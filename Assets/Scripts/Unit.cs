@@ -16,6 +16,12 @@ public class Unit : MonoBehaviour
     public int speed = 10;
     public int moveRange = 2;
 
+    [Header("Skills")]
+    public SkillData[] skillPoolOverride;
+
+    [Header("AI")]
+    public AIProfile aiProfile;
+
     public bool IsDead => currentHP <= 0;
 
     [Header("Animator")]

@@ -688,6 +688,8 @@ MonoBehaviour:
   currentHP: 0
   speed: 7
   moveRange: 2
+  skillPoolOverride: []
+  aiProfile: {fileID: 11400000, guid: 7f01a0630b9ce9c4b92425ea153ae8de, type: 2}
   anim: {fileID: 0}
   attackTrigger: triggerAttack
   hitTrigger: triggerHit
@@ -1535,6 +1537,9 @@ MonoBehaviour:
   currentHP: 0
   speed: 8
   moveRange: 2
+  skillPoolOverride:
+  - {fileID: 11400000, guid: 6d8457086b72aed44ad38f81914e5628, type: 2}
+  aiProfile: {fileID: 11400000, guid: 7f01a0630b9ce9c4b92425ea153ae8de, type: 2}
   anim: {fileID: 0}
   attackTrigger: triggerAttack
   hitTrigger: triggerHit
@@ -1704,6 +1709,8 @@ MonoBehaviour:
   currentHP: 0
   speed: 12
   moveRange: 2
+  skillPoolOverride: []
+  aiProfile: {fileID: 0}
   anim: {fileID: 0}
   attackTrigger: triggerAttack
   hitTrigger: triggerHit
@@ -2674,6 +2681,7 @@ MonoBehaviour:
   - {fileID: 11400000, guid: 8a6558577382f2648acc30128b4d2377, type: 2}
   enemySkills:
   - {fileID: 11400000, guid: 737c7ec0d287b4e4a8b2aea2db7e0c4c, type: 2}
+  enemyAIProfile: {fileID: 0}
   skillButtons:
   - {fileID: 803579639}
   - {fileID: 410415100}
@@ -2732,6 +2740,8 @@ MonoBehaviour:
   currentHP: 0
   speed: 6
   moveRange: 2
+  skillPoolOverride: []
+  aiProfile: {fileID: 11400000, guid: 7f01a0630b9ce9c4b92425ea153ae8de, type: 2}
   anim: {fileID: 0}
   attackTrigger: triggerAttack
   hitTrigger: triggerHit

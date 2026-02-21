@@ -14,6 +14,9 @@ public class BattleController : MonoBehaviour
     public SkillData[] playerSkills;   // 플레이어(아군) 공용 슬롯 0~2
     public SkillData[] enemySkills;    // 적 공용(지금 단계)
 
+    [Header("Enemy AI")]
+    public AIProfile enemyAIProfile;
+
     [Header("UI")]
     public Button[] skillButtons;      // size 3
     public TMP_Text turnText;
@@ -202,8 +205,7 @@ public class BattleController : MonoBehaviour
             SetSkillButtonsInteractable(false);
             busy = true;
 
-            SkillData skill = ChooseEnemySkill();
-            StartCoroutine(RunSkill(activeUnit, skill, OnActionComplete));
+            StartCoroutine(EnemyTurnRoutine(activeUnit, OnActionComplete));
         }
     }
 
@@ -460,5 +462,164 @@ public class BattleController : MonoBehaviour
             }
         }
         return best;
+    }
+
+    IEnumerator EnemyTurnRoutine(Unit enemy, System.Action onComplete)
+    {
+        if (enemy == null || enemy.IsDead)
+        {
+            onComplete?.Invoke();
+            yield break;
+        }
+
+        if (!grid) grid = GridManager.I;
+
+        var profile = (enemy.aiProfile != null) ? enemy.aiProfile : enemyAIProfile;
+
+        // ✅ 유닛 전용 스킬풀 우선
+        var myPool = GetSkillPoolFor(enemy);
+
+        if (profile == null)
+        {
+            // 프로파일 없으면: 유닛 전용 풀에서 랜덤 스킬로 폴백
+            SkillData fallback = (myPool != null && myPool.Length > 0)
+                ? myPool[UnityEngine.Random.Range(0, myPool.Length)]
+                : null;
+
+            if (fallback == null)
+            {
+                onComplete?.Invoke();
+                yield break;
+            }
+
+            yield return RunSkill(enemy, fallback, onComplete);
+            yield break;
+        }
+
+        // Planner 입력 구성
+        var alliesOfEnemy = GetCasterAllies(enemy);
+        var enemiesOfEnemy = GetCasterEnemies(enemy);
+
+        var plan = AIPlanner.Plan(
+            enemy,
+            alliesOfEnemy,
+            enemiesOfEnemy,
+            myPool,        // ✅ 여기!
+            grid,
+            profile,
+            playerSkills   // 적 기준 상대 스킬풀(Threat 계산용)
+        );
+        //평가 디버그
+        Debug.Log($"[AI PLAN] {enemy.name} tile={plan.moveTile} skill={(plan.skill ? plan.skill.skillName : "null")} target={(plan.target ? plan.target.name : "null")} score={plan.score:0.00}");
+        if (plan.moveTile != enemy.GridPos)
+            yield return grid.MoveRoutine(enemy, plan.moveTile);
+
+        yield return RunSkill(enemy, plan.skill, onComplete);
+    }
+
+    bool TryPickBestAttackTile(Unit enemy, SkillData skill, Dictionary<Vector2Int,int> costs, out Vector2Int bestTile)
+    {
+        bestTile = enemy.GridPos;
+
+        var enemies = GetCasterEnemies(enemy); // enemy 기준 "적" = 플레이어팀(=allies)
+        Unit bestTarget = null;
+        int bestMoveCost = int.MaxValue;
+        int bestTargetDist = int.MaxValue;
+
+        foreach (var kv in costs)
+        {
+            Vector2Int tile = kv.Key;
+            int moveCost = kv.Value;
+
+            // 이 타일에서 공격 가능한 타겟(최소 거리) 찾기
+            Unit t = ChooseNearestInRangeFromPos(tile, enemies, skill.minRange, skill.maxRange, out int dist);
+            if (t == null) continue;
+
+            // 우선순위:
+            // 1) 이동 비용 최소
+            // 2) (동률) 타겟까지 거리 최소
+            if (moveCost < bestMoveCost || (moveCost == bestMoveCost && dist < bestTargetDist))
+            {
+                bestMoveCost = moveCost;
+                bestTargetDist = dist;
+                bestTarget = t;
+                bestTile = tile;
+            }
+        }
+
+        return bestTarget != null;
+    }
+
+    bool TryPickBestApproachTile(Unit enemy, Dictionary<Vector2Int,int> costs, out Vector2Int bestTile)
+    {
+        bestTile = enemy.GridPos;
+
+        var enemies = GetCasterEnemies(enemy);
+        int bestNearestDist = int.MaxValue;
+        int bestMoveCost = int.MaxValue;
+
+        foreach (var kv in costs)
+        {
+            Vector2Int tile = kv.Key;
+            int moveCost = kv.Value;
+
+            int nearest = NearestDistanceToAny(tile, enemies);
+            if (nearest == int.MaxValue) continue;
+
+            // 우선순위:
+            // 1) 가장 가까워지는(거리 최소)
+            // 2) (동률) 이동 비용 최소
+            if (nearest < bestNearestDist || (nearest == bestNearestDist && moveCost < bestMoveCost))
+            {
+                bestNearestDist = nearest;
+                bestMoveCost = moveCost;
+                bestTile = tile;
+            }
+        }
+
+        return true;
+    }
+
+    Unit ChooseNearestInRangeFromPos(Vector2Int fromPos, List<Unit> candidates, int minR, int maxR, out int bestDist)
+    {
+        Unit best = null;
+        bestDist = int.MaxValue;
+
+        foreach (var u in candidates)
+        {
+            if (u == null || u.IsDead) continue;
+
+            int d = Mathf.Abs(fromPos.x - u.GridPos.x) + Mathf.Abs(fromPos.y - u.GridPos.y);
+            if (d < minR || d > maxR) continue;
+
+            if (d < bestDist)
+            {
+                bestDist = d;
+                best = u;
+            }
+        }
+
+        return best;
+    }
+
+    int NearestDistanceToAny(Vector2Int fromPos, List<Unit> candidates)
+    {
+        int best = int.MaxValue;
+        foreach (var u in candidates)
+        {
+            if (u == null || u.IsDead) continue;
+            int d = Mathf.Abs(fromPos.x - u.GridPos.x) + Mathf.Abs(fromPos.y - u.GridPos.y);
+            if (d < best) best = d;
+        }
+        return best;
+    }
+
+    SkillData[] GetSkillPoolFor(Unit u)
+    {
+        if (u != null && u.skillPoolOverride != null && u.skillPoolOverride.Length > 0)
+            return u.skillPoolOverride;
+
+        // 폴백
+        return IsAlly(u) ? playerSkills : enemySkills;
     }
 }

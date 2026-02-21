@@ -214,6 +214,56 @@ public class GridManager : MonoBehaviour
         // 아래는 "SetGridPosOnly"를 우선 호출 시도 (없으면 reflection 없이 안전하게 무시)
         u.SetGridPosOnly(p);
     }
+    public bool CanStandFor(Unit mover, Vector2Int p)
+    {
+        if (!InBounds(p)) return false;
+
+        // 비어있으면 OK
+        if (!occ.TryGetValue(p, out var u) || u == null || u.IsDead) return true;
+
+        // 자기 자리면 OK (BFS 시작점 처리)
+        return u == mover;
+    }
+
+    /// <summary>
+    /// BFS로 moveRange 내 도달 가능한 타일과, 그 타일까지의 최소 이동 비용(맨해튼 step)을 반환.
+    /// - mover 본인 위치는 비용 0으로 포함.
+    /// - 다른 유닛이 점유한 칸은 통과/도착 불가.
+    /// </summary>
+    public Dictionary<Vector2Int, int> GetReachableCosts(Unit mover, int moveRange)
+    {
+        var result = new Dictionary<Vector2Int, int>();
+        if (mover == null) return result;
+
+        Vector2Int start = mover.GridPos;
+        var q = new Queue<Vector2Int>();
+
+        result[start] = 0;
+        q.Enqueue(start);
+
+        while (q.Count > 0)
+        {
+            var cur = q.Dequeue();
+            int curCost = result[cur];
+
+            if (curCost >= moveRange) continue;
+
+            foreach (var nb in GetNeighbors4(cur))
+            {
+                if (!CanStandFor(mover, nb)) continue;
+
+                int nextCost = curCost + 1;
+                if (nextCost > moveRange) continue;
+
+                if (result.TryGetValue(nb, out int old) && old <= nextCost) continue;
+
+                result[nb] = nextCost;
+                q.Enqueue(nb);
+            }
+        }
+
+        return result;
+    }
 
 #if UNITY_EDITOR
     void OnDrawGizmos()

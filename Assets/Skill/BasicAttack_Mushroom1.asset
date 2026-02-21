@@ -10,7 +10,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: fea434eed2669bb45a0502daf44b9525, type: 3}
-  m_Name: BasicAttack_Mushroom
+  m_Name: BasicAttack_Mushroom1
   m_EditorClassIdentifier: Assembly-CSharp::SkillData
   skillName: Basic Attack
   animationTrigger: triggerAttack
@@ -19,4 +19,4 @@ MonoBehaviour:
   - {fileID: 11400000, guid: da7aa45e3f24f5b469cc06a8b1a89eb7, type: 2}
   targetType: 1
   minRange: 1
-  maxRange: 1
+  maxRange: 3
