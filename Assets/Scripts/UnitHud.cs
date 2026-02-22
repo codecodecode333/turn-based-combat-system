@@ -14,12 +14,25 @@ public class UnitHud : MonoBehaviour
 
     Camera cam;
 
+    [Header("Target UX")]
+    public GameObject targetIndicator; // 아이콘(예: !, 검표시 등) 오브젝트
+
     
 
     void Awake()
     {
         if (!unit) unit = GetComponentInParent<Unit>();
         cam = Camera.main;
+
+        if (!targetIndicator)
+        {
+            // 네 구조: UnitHud/Canvas/Target_indicator
+            var t = transform.Find("Canvas/Target_indicator");
+            if (t) targetIndicator = t.gameObject;
+        }
+
+        // 기본은 무조건 OFF (항상 떠있는 버그 방지)
+        if (targetIndicator) targetIndicator.SetActive(false);
     }
 
     void LateUpdate()
@@ -51,5 +64,11 @@ public class UnitHud : MonoBehaviour
     public void SetTurnInfo(string info)
     {
         if (turnText) turnText.text = info;
+    }
+
+    public void SetTargeted(bool on)
+    {
+        if (targetIndicator)
+            targetIndicator.SetActive(on);
     }
 }

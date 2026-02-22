@@ -18,5 +18,5 @@ MonoBehaviour:
   effects:
   - {fileID: 11400000, guid: 27293b590f44e1b46a903f60a7ffec2e, type: 2}
   targetType: 1
-  minRange: 0
-  maxRange: 10
+  minRange: 1
+  maxRange: 3

@@ -3,9 +3,17 @@ using System.Collections.Generic;
 using UnityEngine;
 using TMPro;
 using UnityEngine.UI;
+using UnityEngine.InputSystem;
 
 public class BattleController : MonoBehaviour
 {
+    [Header("UX")]
+    public TileHighlighter tileHighlighter;
+
+    SkillData selectedSkill = null;
+    int selectedSkillIndex = -1;
+    Dictionary<Vector2Int,int> reachableMoveCache;
+
     [Header("Teams")]
     public List<Unit> allies = new List<Unit>();
     public List<Unit> enemies = new List<Unit>();
@@ -36,11 +44,28 @@ public class BattleController : MonoBehaviour
 
     public GridManager grid;
 
+    private readonly List<Unit> previewTargetUnits = new List<Unit>(16);
+
 
     void Start()
     {
         SetupSkillButtons();
         StartBattle();
+    }
+    void Update()
+    {
+        if (!waitingInput || busy) return;
+
+        if (selectedSkill != null &&
+            Keyboard.current != null &&
+            Keyboard.current.escapeKey.wasPressedThisFrame)
+        {
+            selectedSkill = null;
+            selectedSkillIndex = -1;
+            ClearPreviewTargetIndicators();
+            if (tileHighlighter)
+                tileHighlighter.ShowReachableMoveTiles(activeUnit);
+        }
     }
 
     void SetupSkillButtons()
@@ -78,6 +103,7 @@ public class BattleController : MonoBehaviour
         busy = false;
 
         if (!grid) grid = GridManager.I;
+        if (!tileHighlighter) tileHighlighter = FindObjectOfType<TileHighlighter>();
 
         foreach (var a in allies)
         if (a != null)
@@ -198,6 +224,8 @@ public class BattleController : MonoBehaviour
             // 플레이어 입력 턴
             waitingInput = true;
             SetSkillButtonsInteractable(true);
+            // ✅ 입력 대기 상태에서만 표시
+            if (tileHighlighter) tileHighlighter.ShowReachableMoveTiles(activeUnit);
         }
         else
         {
@@ -210,10 +238,15 @@ public class BattleController : MonoBehaviour
     }
 
     void OnActionComplete()
-    {
+    {   
+        selectedSkill = null;
+        selectedSkillIndex = -1;
+        if (tileHighlighter) tileHighlighter.ClearAll();
+        ClearPreviewTargetIndicators();
         // 이번 행동자 처리 완료 → 다음 유닛
         busy = false;
         waitingInput = false;
+        if (tileHighlighter) tileHighlighter.ClearAll();
 
         if (activeUnit != null && !activeUnit.IsDead)
             activeUnit.OnTurnEnd();
@@ -254,12 +287,55 @@ public class BattleController : MonoBehaviour
         SkillData skill = playerSkills[skillIndex];
         if (skill == null) return;
 
-        waitingInput = false;
-        busy = true;
-        SetSkillButtonsInteractable(false);
+        if (selectedSkill == skill && selectedSkillIndex == skillIndex)
+        {
+            if (tileHighlighter) tileHighlighter.ClearAll();
+            ClearPreviewTargetIndicators();
+            if (tileHighlighter) tileHighlighter.ClearAll();
 
-        // 플레이어 행동 후 -> OnActionComplete로 다음 유닛
-        StartCoroutine(RunSkill(activeUnit, skill, OnActionComplete));
+            selectedSkill = null;
+            selectedSkillIndex = -1;
+
+            waitingInput = false;
+            busy = true;
+            SetSkillButtonsInteractable(false);
+
+            StartCoroutine(RunSkill(activeUnit, skill, OnActionComplete));
+            return;
+        }
+
+        // ✅ 1클릭: 선택 + 사거리 표시(RED)
+        selectedSkill = skill;
+        selectedSkillIndex = skillIndex;
+
+        // (필드명이 다르면 여기만 바꿔)
+        int minR = skill.minRange;
+        int maxR = skill.maxRange;
+
+        // 하이라이트 초기화
+        if (tileHighlighter) tileHighlighter.ClearAll();
+        // 1클릭: 사거리 표시(RED)
+        var tiles = BuildManhattanRangeTiles(activeUnit.GridPos, minR, maxR);
+        if (tileHighlighter) tileHighlighter.ShowRangeTiles(tiles);
+        ClearPreviewTargetIndicators();
+
+        // ✅ RunSkill과 동일 로직으로 타겟 계산
+        var targets = ResolveTargets(skill, activeUnit, GetCasterAllies(activeUnit), GetCasterEnemies(activeUnit));
+
+        // ✅ 타겟 유닛 HUD 아이콘 켜기
+        for (int i = 0; i < targets.Count; i++)
+        {
+            var t = targets[i];
+            if (t == null || t.IsDead) continue;
+
+            var hud = GetHud(t);
+            if (hud) hud.SetTargeted(true);
+
+            previewTargetUnits.Add(t);
+        }
+        // ✅ 3단계: 실제 타겟 강조(진한 RED)
+        var targetTiles = GetPreviewTargetTiles(skill, activeUnit);
+        if (tileHighlighter) tileHighlighter.ShowTargetTiles(targetTiles);
     }
 
     SkillData ChooseEnemySkill()
@@ -621,5 +697,71 @@ public class BattleController : MonoBehaviour
 
         // 폴백
         return IsAlly(u) ? playerSkills : enemySkills;
+    }
+
+    private List<Vector2Int> BuildManhattanRangeTiles(Vector2Int origin, int minR, int maxR)
+    {
+        var list = new List<Vector2Int>();
+        if (!grid) grid = GridManager.I;
+        if (!grid) return list;
+
+        if (minR < 0) minR = 0;
+        if (maxR < minR) maxR = minR;
+
+        for (int d = minR; d <= maxR; d++)
+        {
+            for (int dx = -d; dx <= d; dx++)
+            {
+                int dy = d - Mathf.Abs(dx);
+
+                var p1 = new Vector2Int(origin.x + dx, origin.y + dy);
+                if (grid.InBounds(p1)) list.Add(p1);
+
+                if (dy != 0)
+                {
+                    var p2 = new Vector2Int(origin.x + dx, origin.y - dy);
+                    if (grid.InBounds(p2)) list.Add(p2);
+                }
+            }
+        }
+
+        return list;
+    }
+
+    List<Vector2Int> GetPreviewTargetTiles(SkillData skill, Unit attacker)
+    {
+        // RunSkill과 100% 동일한 입력으로 타겟 계산
+        var targets = ResolveTargets(skill, attacker, GetCasterAllies(attacker), GetCasterEnemies(attacker));
+
+        // 중복 제거 + 죽은 유닛 제외
+        var set = new HashSet<Vector2Int>();
+        for (int i = 0; i < targets.Count; i++)
+        {
+            var u = targets[i];
+            if (u == null || u.IsDead) continue;
+            set.Add(u.GridPos);
+        }
+
+        return new List<Vector2Int>(set);
+    }
+
+    UnitHud GetHud(Unit u)
+    {
+        if (u == null) return null;
+        var hud = u.GetComponentInChildren<UnitHud>(true); // true: 비활성 오브젝트도 검색
+        if (hud == null)
+            Debug.LogWarning($"[UX] UnitHud NOT FOUND on {u.name}");
+        return hud;
+    }
+
+    void ClearPreviewTargetIndicators()
+    {
+        for (int i = 0; i < previewTargetUnits.Count; i++)
+        {
+            var u = previewTargetUnits[i];
+            var hud = GetHud(u);
+            if (hud) hud.SetTargeted(false);
+        }
+        previewTargetUnits.Clear();
     }
 }

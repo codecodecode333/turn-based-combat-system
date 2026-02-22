@@ -5,7 +5,6 @@ using UnityEngine;
 [CreateAssetMenu(menuName = "Battle/SkillEffect/MoveTowardNearestEnemy", fileName = "MoveTowardNearestEnemy_")]
 public class MoveTowardNearestEnemyEffect : SkillEffect
 {
-    [Min(1)] public int moveRange = 3;
 
     public override void Apply(Unit attacker, Unit targetIgnored)
     {
@@ -44,7 +43,7 @@ public class MoveTowardNearestEnemyEffect : SkillEffect
         if (nearest == null) return;
 
         // BFS로 이동 가능한 모든 타일 수집
-        var reachable = GetReachableTiles(grid, attacker.GridPos, moveRange);
+        var reachable = GetReachableTiles(grid, attacker.GridPos, attacker.moveRange);
 
         // reachable 중에서 "nearest에게 가장 가까워지는" 타일 선택
         Vector2Int best = attacker.GridPos;
