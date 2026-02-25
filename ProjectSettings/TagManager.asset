@@ -44,6 +44,9 @@ TagManager:
   - name: Ground
     uniqueID: 285898155
     locked: 0
+  - name: Highlight
+    uniqueID: 696240517
+    locked: 0
   - name: Units
     uniqueID: 1623318147
     locked: 0

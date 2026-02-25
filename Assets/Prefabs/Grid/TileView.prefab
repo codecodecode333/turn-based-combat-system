@@ -10,7 +10,7 @@ GameObject:
   m_Component:
   - component: {fileID: 5469194270950185286}
   - component: {fileID: 2302792281303256495}
-  - component: {fileID: 8561475385389302645}
+  - component: {fileID: 344321455563492930}
   - component: {fileID: 3272374588090205614}
   m_Layer: 0
   m_Name: TileView
@@ -79,8 +79,8 @@ SpriteRenderer:
   m_AutoUVMaxAngle: 89
   m_LightmapParameters: {fileID: 0}
   m_GlobalIlluminationMeshLod: 0
-  m_SortingLayerID: 0
-  m_SortingLayer: 0
+  m_SortingLayerID: 285898155
+  m_SortingLayer: 1
   m_SortingOrder: 0
   m_MaskInteraction: 0
   m_Sprite: {fileID: 21300000, guid: ea53cdd32adc8a54ab085f2790b4565d, type: 3}
@@ -93,8 +93,8 @@ SpriteRenderer:
   m_SpriteTileMode: 0
   m_WasSpriteAssigned: 1
   m_SpriteSortPoint: 0
---- !u!61 &8561475385389302645
-BoxCollider2D:
+--- !u!60 &344321455563492930
+PolygonCollider2D:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
@@ -137,8 +137,20 @@ BoxCollider2D:
     drawMode: 0
     adaptiveTiling: 0
   m_AutoTiling: 0
-  m_Size: {x: 1, y: 0.5}
-  m_EdgeRadius: 0
+  m_Points:
+    m_Paths:
+    - - {x: -0.0011255462, y: 0.27724254}
+      - {x: -0.24706763, y: 0.15154707}
+      - {x: -0.48555398, y: 0.020392895}
+      - {x: -0.49455154, y: 0.019632459}
+      - {x: -0.49455142, y: -0.008735418}
+      - {x: -0.13301507, y: -0.184618}
+      - {x: 0.0058535933, y: -0.25}
+      - {x: 0.5054485, y: -0.0011255741}
+      - {x: 0.510897, y: 0.014183998}
+      - {x: 0.25362888, y: 0.15371513}
+      - {x: 0.0065740347, y: 0.27724242}
+  m_UseDelaunayMesh: 1
 --- !u!114 &3272374588090205614
 MonoBehaviour:
   m_ObjectHideFlags: 0

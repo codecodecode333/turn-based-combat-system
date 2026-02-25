@@ -46,6 +46,12 @@ public class BattleController : MonoBehaviour
 
     private readonly List<Unit> previewTargetUnits = new List<Unit>(16);
 
+    // 입력 모드
+    private enum PlayerInputMode { Move, SkillPreview }
+    private PlayerInputMode inputMode = PlayerInputMode.Move;
+
+    private bool hasMovedThisTurn = false;
+
 
     void Start()
     {
@@ -224,6 +230,9 @@ public class BattleController : MonoBehaviour
             // 플레이어 입력 턴
             waitingInput = true;
             SetSkillButtonsInteractable(true);
+            hasMovedThisTurn = false;
+            reachableMoveCache = grid.GetReachableCosts(activeUnit, activeUnit.moveRange);
+            inputMode = PlayerInputMode.Move;
             // ✅ 입력 대기 상태에서만 표시
             if (tileHighlighter) tileHighlighter.ShowReachableMoveTiles(activeUnit);
         }
@@ -314,6 +323,7 @@ public class BattleController : MonoBehaviour
 
         // 하이라이트 초기화
         if (tileHighlighter) tileHighlighter.ClearAll();
+        reachableMoveCache = null;
         // 1클릭: 사거리 표시(RED)
         var tiles = BuildManhattanRangeTiles(activeUnit.GridPos, minR, maxR);
         if (tileHighlighter) tileHighlighter.ShowRangeTiles(tiles);
@@ -763,5 +773,59 @@ public class BattleController : MonoBehaviour
             if (hud) hud.SetTargeted(false);
         }
         previewTargetUnits.Clear();
+    }
+
+    public void OnTileClicked(Vector2Int gridPos)
+    {
+        if (hasMovedThisTurn) return;
+        if (battleEnded) return;
+        if (!waitingInput || busy) return;
+        if (activeUnit == null || activeUnit.IsDead) return;
+        if (!IsAlly(activeUnit)) return; // 플레이어 턴에서만
+
+        // 이동 모드일 때만 처리
+        if (inputMode != PlayerInputMode.Move) return;
+
+        // 캐시 없으면 안전하게 재계산
+        if (reachableMoveCache == null)
+            reachableMoveCache = grid.GetReachableCosts(activeUnit, activeUnit.moveRange);
+
+        // ✅ “보이는 칸만 이동 가능” (표시=판정)
+        if (!reachableMoveCache.ContainsKey(gridPos))
+            return;
+
+        // 시작칸 클릭은 무시(원하면 대기/확정으로 쓸 수도)
+        if (gridPos == activeUnit.GridPos)
+            return;
+
+        // 이동 시작
+        StartCoroutine(PlayerMoveRoutine(gridPos));
+    }
+
+    private IEnumerator PlayerMoveRoutine(Vector2Int to)
+    {
+        busy = true;
+        waitingInput = false;
+        SetSkillButtonsInteractable(false);
+
+        // 이동 하이라이트 제거
+        if (tileHighlighter) tileHighlighter.ClearAll();
+
+        // 실제 이동 (논리 이동은 GridManager.MoveRoutine이 담당)
+        yield return StartCoroutine(grid.MoveRoutine(activeUnit, to));
+
+        // 이동 후: "행동 선택 상태"로 복귀
+        busy = false;
+        waitingInput = true;
+        SetSkillButtonsInteractable(true);
+
+        // 다음 UX: 여기서 “이동 후 다시 이동 Blue를 보여줄지” 정책 선택
+        // 일반적으로는 이동을 한 번 했으면 이동 표시를 다시 안 띄우고,
+        // 스킬/대기 중 하나를 선택하게 두는 게 턴제가 깔끔함.
+
+        // 스킬 선택 모드 초기화
+        hasMovedThisTurn = true;
+        inputMode = PlayerInputMode.SkillPreview; // 또는 Move가 아닌 상태로(스킬/대기 선택 단계)
+        reachableMoveCache = null;
     }
 }
