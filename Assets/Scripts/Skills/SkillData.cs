@@ -1,20 +1,33 @@
 using UnityEngine;
+
 public enum SkillTiming
 {
-    Immediate,     // 버튼 누르자마자
-    OnAttackHit,   // 공격 애니메이션의 OnAttackHit
-    OnAttackEnd    // 공격 애니메이션 종료 시
+    Immediate,
+    OnAttackHit,
+    OnAttackEnd
 }
 
+// ✅ 신규: 타겟 모드
+public enum SkillTargetMode
+{
+    AutoNearestSingle,     // 클릭 없이, 사거리 내 가장 가까운 1개
+    ClickSingle,           // 유닛 클릭 1개
+    ClickTileAOE,          // 타일 클릭 중심 AOE
+    AllEnemiesInRange,     // 사거리 내 적 전체
+    AllEnemiesAnywhere,    // 전체 적
+    AllAlliesInRange,      // 사거리 내 아군 전체
+    AllAlliesAnywhere      // 전체 아군
+}
+
+// (구 enum은 남겨도 되지만, 앞으로 안 쓸 예정이면 나중에 제거)
 public enum SkillTargetType
 {
-    Self,           // 자기 자신
-    SingleEnemy,    // 적 1명
-    SingleAlly,     // 아군 1명 (자기 제외 가능)
-    AllEnemies,     // 적 전체
-    AllAllies       // 아군 전체
+    Self,
+    SingleEnemy,
+    SingleAlly,
+    AllEnemies,
+    AllAllies
 }
-
 
 [CreateAssetMenu(menuName = "Battle/Skill")]
 public class SkillData : ScriptableObject
@@ -22,16 +35,23 @@ public class SkillData : ScriptableObject
     public string skillName;
 
     [Header("Animation")]
-    public string animationTrigger;   // triggerAttack / triggerCast / triggerAttack2 등
+    public string animationTrigger;
     public SkillTiming timing;
 
     [Header("Effect")]
     public SkillEffect[] effects;
 
-    [Header("Target")]
-    public SkillTargetType targetType;
+    [Header("Target (NEW)")]
+    public SkillTargetMode targetMode = SkillTargetMode.ClickSingle;
+
+    [Tooltip("ClickTileAOE에서 사용. 중심 타일로부터 Manhattan 반경")]
+    public int aoeRadius = 0;
 
     [Header("Range (Manhattan)")]
     public int minRange = 0;
     public int maxRange = 1;
+
+    // (구 필드 유지 - 나중에 정리)
+    [Header("Target (LEGACY)")]
+    public SkillTargetType targetType;
 }

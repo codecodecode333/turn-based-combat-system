@@ -43,14 +43,25 @@ public class BattleController : MonoBehaviour
     List<Unit> GetCasterEnemies(Unit caster) => IsAlly(caster) ? enemies : allies;
 
     public GridManager grid;
-
     private readonly List<Unit> previewTargetUnits = new List<Unit>(16);
 
+    public bool IsBusy => busy;
+    public bool IsWaitingInput => waitingInput;
+
     // 입력 모드
-    private enum PlayerInputMode { Move, SkillPreview }
+    public enum PlayerInputMode
+    {
+        Move,
+        SkillPreview
+    }
     private PlayerInputMode inputMode = PlayerInputMode.Move;
 
     private bool hasMovedThisTurn = false;
+
+    public PlayerInputMode InputMode => inputMode;
+    public SkillData SelectedSkill => selectedSkill;
+    public Unit ActiveUnit => activeUnit;
+    private Vector2Int? hoverTile = null;
 
 
     void Start()
@@ -69,6 +80,7 @@ public class BattleController : MonoBehaviour
             selectedSkill = null;
             selectedSkillIndex = -1;
             ClearPreviewTargetIndicators();
+            ClearHoverAOEPreview();
 
             waitingInput = true;
             inputMode = PlayerInputMode.Move;
@@ -260,6 +272,7 @@ public class BattleController : MonoBehaviour
 
     void OnActionComplete()
     {   
+        ClearHoverAOEPreview();
         selectedSkill = null;
         selectedSkillIndex = -1;
         if (tileHighlighter) tileHighlighter.ClearAll();
@@ -341,9 +354,10 @@ public class BattleController : MonoBehaviour
         var tiles = BuildManhattanRangeTiles(activeUnit.GridPos, minR, maxR);
         if (tileHighlighter) tileHighlighter.ShowRangeTiles(tiles);
         ClearPreviewTargetIndicators();
-
+        ClearHoverAOEPreview();
         // ✅ RunSkill과 동일 로직으로 타겟 계산
-        var targets = ResolveTargets(skill, activeUnit, GetCasterAllies(activeUnit), GetCasterEnemies(activeUnit));
+        var targets = ResolveTargets(skill, activeUnit, GetCasterAllies(activeUnit), GetCasterEnemies(activeUnit), null, null);
+        Debug.Log($"[UseSkill Preview] skill={skill.skillName}, mode={skill.targetMode}, legacyType={skill.targetType}, min={skill.minRange}, max={skill.maxRange}, allies={GetCasterAllies(activeUnit).Count}, enemies={GetCasterEnemies(activeUnit).Count}, targets={targets.Count}");
 
         // ✅ 타겟 유닛 HUD 아이콘 켜기
         for (int i = 0; i < targets.Count; i++)
@@ -374,19 +388,24 @@ public class BattleController : MonoBehaviour
     // =========================
     IEnumerator RunSkill(Unit attacker, SkillData skill, System.Action onComplete)
     {
+        yield return RunSkill(attacker, skill, onComplete, null, null);
+    }
+
+    IEnumerator RunSkill(Unit attacker, SkillData skill, System.Action onComplete, Vector2Int? clickedTile, Unit clickedUnit)
+    {
         if (attacker == null || skill == null)
         {
             onComplete?.Invoke();
             yield break;
         }
 
-        List<Unit> targets = ResolveTargets(skill, attacker, GetCasterAllies(attacker), GetCasterEnemies(attacker));
+        var targets = ResolveTargets(skill, attacker, GetCasterAllies(attacker), GetCasterEnemies(attacker), clickedTile, clickedUnit);
         if (targets.Count == 0)
         {
-            // 사거리 밖이면 그냥 공격 애니도 안 하고 턴 종료(원하면 애니만 하고 종료로 바꿔도 됨)
             onComplete?.Invoke();
             yield break;
         }
+
         bool hitDone = false;
         bool endDone = false;
 
@@ -394,71 +413,46 @@ public class BattleController : MonoBehaviour
         {
             if (hitDone) return;
             hitDone = true;
-
             foreach (var t in targets)
-            {
                 if (t != null && !t.IsDead)
                     ApplySkillEffects(skill, attacker, t);
-            }
         }
 
-        void OnEnd()
-        {
-            endDone = true;
-        }
+        void OnEnd() { endDone = true; }
 
         attacker.AttackHitEvent += OnHit;
         attacker.AttackEndEvent += OnEnd;
 
-        // Unit.cs에 PlayAttack(string) 있어야 함
         attacker.PlayAttack(skill.animationTrigger);
 
         float timeout = 1.5f;
         float t = 0f;
 
-        // 1) 효과 타이밍
         if (skill.timing == SkillTiming.Immediate)
         {
             foreach (var tt in targets)
-            {
                 if (tt != null && !tt.IsDead)
                     ApplySkillEffects(skill, attacker, tt);
-            }
             hitDone = true;
         }
         else if (skill.timing == SkillTiming.OnAttackHit)
         {
-            while (!hitDone && t < timeout)
-            {
-                t += Time.deltaTime;
-                yield return null;
-            }
+            while (!hitDone && t < timeout) { t += Time.deltaTime; yield return null; }
         }
         else if (skill.timing == SkillTiming.OnAttackEnd)
         {
-            while (!endDone && t < timeout)
-            {
-                t += Time.deltaTime;
-                yield return null;
-            }
+            while (!endDone && t < timeout) { t += Time.deltaTime; yield return null; }
             if (!hitDone)
             {
                 foreach (var tt in targets)
-                {
                     if (tt != null && !tt.IsDead)
                         ApplySkillEffects(skill, attacker, tt);
-                }
                 hitDone = true;
             }
         }
 
-        // 2) 턴 종료는 항상 공격 애니 종료까지 기다림
         t = 0f;
-        while (!endDone && t < timeout)
-        {
-            t += Time.deltaTime;
-            yield return null;
-        }
+        while (!endDone && t < timeout) { t += Time.deltaTime; yield return null; }
 
         attacker.AttackHitEvent -= OnHit;
         attacker.AttackEndEvent -= OnEnd;
@@ -482,41 +476,126 @@ public class BattleController : MonoBehaviour
     // =========================
     // Target resolver
     // =========================
-    List<Unit> ResolveTargets(SkillData skill, Unit caster, List<Unit> allies, List<Unit> enemies)
+    List<Unit> ResolveTargets(
+        SkillData skill,
+        Unit caster,
+        List<Unit> allies,
+        List<Unit> enemies,
+        Vector2Int? clickedTile = null,
+        Unit clickedUnit = null
+    )
     {
-        List<Unit> targets = new List<Unit>();
+        var targets = new List<Unit>();
+        if (skill == null || caster == null) return targets;
 
-        switch (skill.targetType)
+        int Dist(Vector2Int a, Vector2Int b) => Mathf.Abs(a.x - b.x) + Mathf.Abs(a.y - b.y);
+
+        bool InCastRange(Vector2Int from, Vector2Int to)
         {
-            case SkillTargetType.Self:
-                targets.Add(caster);
-                break;
+            int d = Dist(from, to);
+            return d >= skill.minRange && d <= skill.maxRange;
+        }
 
-            case SkillTargetType.SingleEnemy:
+        IEnumerable<Unit> Alive(IEnumerable<Unit> list)
+        {
+            foreach (var u in list)
+                if (u != null && !u.IsDead)
+                    yield return u;
+        }
+
+        Unit NearestInRange(IEnumerable<Unit> candidates)
+        {
+            Unit best = null;
+            int bestDist = int.MaxValue;
+
+            foreach (var u in Alive(candidates))
             {
-                Unit t = ChooseNearestInRange(caster, enemies, skill.minRange, skill.maxRange);
+                int d = Dist(caster.GridPos, u.GridPos);
+                if (d < skill.minRange || d > skill.maxRange) continue;
+
+                if (d < bestDist)
+                {
+                    bestDist = d;
+                    best = u;
+                }
+            }
+            return best;
+        }
+
+        void AddAOEFromCenter(Vector2Int center, IEnumerable<Unit> candidates)
+        {
+            int r = Mathf.Max(0, skill.aoeRadius);
+            foreach (var u in Alive(candidates))
+            {
+                if (Dist(center, u.GridPos) <= r)
+                    targets.Add(u);
+            }
+        }
+
+        switch (skill.targetMode)
+        {
+            case SkillTargetMode.AutoNearestSingle:
+            {
+                var t = NearestInRange(enemies);
                 if (t != null) targets.Add(t);
                 break;
             }
 
-            case SkillTargetType.SingleAlly:
+            case SkillTargetMode.ClickSingle:
             {
-                Unit t = ChooseNearestInRange(caster, allies, skill.minRange, skill.maxRange);
-                if (t != null) targets.Add(t);
-                break;
-            }
+                // 확정(클릭)
+                if (clickedUnit != null && !clickedUnit.IsDead)
+                {
+                    if (!allies.Contains(clickedUnit) && InCastRange(caster.GridPos, clickedUnit.GridPos))
+                        targets.Add(clickedUnit);
+                    break;
+                }
 
-            case SkillTargetType.AllEnemies:
-                foreach (var e in enemies)
-                    if (e != null && !e.IsDead)
+                // 프리뷰(후보)
+                foreach (var e in Alive(enemies))
+                    if (InCastRange(caster.GridPos, e.GridPos))
                         targets.Add(e);
                 break;
+            }
 
-            case SkillTargetType.AllAllies:
-                foreach (var a in allies)
-                    if (a != null && !a.IsDead)
+            case SkillTargetMode.ClickTileAOE:
+            {
+                if (!clickedTile.HasValue) break;
+                var center = clickedTile.Value;
+
+                if (!InCastRange(caster.GridPos, center)) break;
+
+                AddAOEFromCenter(center, enemies);
+                break;
+            }
+
+            case SkillTargetMode.AllEnemiesInRange:
+            {
+                foreach (var e in Alive(enemies))
+                    if (InCastRange(caster.GridPos, e.GridPos))
+                        targets.Add(e);
+                break;
+            }
+
+            case SkillTargetMode.AllEnemiesAnywhere:
+            {
+                targets.AddRange(Alive(enemies));
+                break;
+            }
+
+            case SkillTargetMode.AllAlliesInRange:
+            {
+                foreach (var a in Alive(allies))
+                    if (InCastRange(caster.GridPos, a.GridPos))
                         targets.Add(a);
                 break;
+            }
+
+            case SkillTargetMode.AllAlliesAnywhere:
+            {
+                targets.AddRange(Alive(allies));
+                break;
+            }
         }
 
         return targets;
@@ -754,7 +833,7 @@ public class BattleController : MonoBehaviour
     List<Vector2Int> GetPreviewTargetTiles(SkillData skill, Unit attacker)
     {
         // RunSkill과 100% 동일한 입력으로 타겟 계산
-        var targets = ResolveTargets(skill, attacker, GetCasterAllies(attacker), GetCasterEnemies(attacker));
+        var targets = ResolveTargets(skill, attacker, GetCasterAllies(attacker), GetCasterEnemies(attacker), null, null);
 
         // 중복 제거 + 죽은 유닛 제외
         var set = new HashSet<Vector2Int>();
@@ -786,33 +865,6 @@ public class BattleController : MonoBehaviour
             if (hud) hud.SetTargeted(false);
         }
         previewTargetUnits.Clear();
-    }
-
-    public void OnTileClicked(Vector2Int gridPos)
-    {
-        if (hasMovedThisTurn) return;
-        if (battleEnded) return;
-        if (!waitingInput || busy) return;
-        if (activeUnit == null || activeUnit.IsDead) return;
-        if (!IsAlly(activeUnit)) return; // 플레이어 턴에서만
-
-        // 이동 모드일 때만 처리
-        if (inputMode != PlayerInputMode.Move) return;
-
-        // 캐시 없으면 안전하게 재계산
-        if (reachableMoveCache == null)
-            reachableMoveCache = grid.GetReachableCosts(activeUnit, activeUnit.moveRange);
-
-        // ✅ “보이는 칸만 이동 가능” (표시=판정)
-        if (!reachableMoveCache.ContainsKey(gridPos))
-            return;
-
-        // 시작칸 클릭은 무시(원하면 대기/확정으로 쓸 수도)
-        if (gridPos == activeUnit.GridPos)
-            return;
-
-        // 이동 시작
-        StartCoroutine(PlayerMoveRoutine(gridPos));
     }
 
     private IEnumerator PlayerMoveRoutine(Vector2Int to)
@@ -847,119 +899,113 @@ public class BattleController : MonoBehaviour
         if (battleEnded) return;
         if (!waitingInput || busy) return;
         if (activeUnit == null || activeUnit.IsDead) return;
-        if (!IsAlly(activeUnit)) return; // 플레이어 턴에서만
+        if (!IsAlly(activeUnit)) return;
 
-        // ✅ 스킬 미리보기 모드일 때만 처리
         if (inputMode != PlayerInputMode.SkillPreview) return;
         if (selectedSkill == null) return;
         if (clicked == null || clicked.IsDead) return;
 
-        // 아군 클릭은 무시(원하면 힐/버프 스킬 때 확장)
-        if (IsAlly(clicked)) return;
+        // ClickSingle에서만 유닛 클릭을 사용
+        if (selectedSkill.targetMode != SkillTargetMode.ClickSingle)
+            return;
 
-        // ✅ RunSkill과 동일 기준으로 “클릭 타겟이 실제 타겟 후보인지” 검증
-        var resolved = ResolveTargets(selectedSkill, activeUnit, GetCasterAllies(activeUnit), GetCasterEnemies(activeUnit));
-        bool ok = false;
-        for (int i = 0; i < resolved.Count; i++)
-        {
-            if (resolved[i] == clicked) { ok = true; break; }
-        }
-        if (!ok) return; // 사거리 밖/조건 불만족
+        // ✅ ResolveTargets로 클릭 검증 (clickedUnit 넣어서 확정 타겟 계산)
+        var resolved = ResolveTargets(selectedSkill, activeUnit, GetCasterAllies(activeUnit), GetCasterEnemies(activeUnit), null, clicked);
+        if (resolved.Count == 0) return;
 
-        // ✅ 여기서 즉시 발동(클릭 타겟을 강제)
-        StartCoroutine(RunSkillForcedTarget(activeUnit, selectedSkill, clicked, OnActionComplete));
+        // UX 정리
+        if (tileHighlighter) tileHighlighter.ClearAll();
+        ClearPreviewTargetIndicators();
+        ClearHoverAOEPreview();
+        waitingInput = false;
+        busy = true;
+        SetSkillButtonsInteractable(false);
+
+        StartCoroutine(RunSkill(activeUnit, selectedSkill, OnActionComplete, null, clicked));
     }
 
-    IEnumerator RunSkillForcedTarget(Unit attacker, SkillData skill, Unit forcedTarget, System.Action onComplete)
+    public void OnTileClicked(Vector2Int gridPos)
     {
-        if (attacker == null || skill == null || forcedTarget == null)
+        if (battleEnded) return;
+        if (!waitingInput || busy) return;
+        if (activeUnit == null || activeUnit.IsDead) return;
+        if (!IsAlly(activeUnit)) return;
+
+        // ✅ 스킬 AOE 타일 클릭 처리
+        if (inputMode == PlayerInputMode.SkillPreview && selectedSkill != null &&
+            selectedSkill.targetMode == SkillTargetMode.ClickTileAOE)
         {
-            onComplete?.Invoke();
-            yield break;
+            var resolved = ResolveTargets(selectedSkill, activeUnit, GetCasterAllies(activeUnit), GetCasterEnemies(activeUnit), gridPos, null);
+            if (resolved.Count == 0) return;
+
+            if (tileHighlighter) tileHighlighter.ClearAll();
+            ClearPreviewTargetIndicators();
+            ClearHoverAOEPreview();
+            waitingInput = false;
+            busy = true;
+            SetSkillButtonsInteractable(false);
+
+            StartCoroutine(RunSkill(activeUnit, selectedSkill, OnActionComplete, gridPos, null));
+            return;
         }
 
-        // UX 정리(타일/아이콘 등)
-        if (tileHighlighter) tileHighlighter.ClearAll();
-        ClearPreviewTargetIndicators(); // 네가 타겟 아이콘 토글 구현했다면
+        // ===== 이동 처리(기존 유지) =====
+        if (hasMovedThisTurn) return;
+        if (inputMode != PlayerInputMode.Move) return;
 
-        // 강제 타겟 리스트
-        List<Unit> targets = new List<Unit> { forcedTarget };
+        if (reachableMoveCache == null)
+            reachableMoveCache = grid.GetReachableCosts(activeUnit, activeUnit.moveRange);
 
-        bool hitDone = false;
-        bool endDone = false;
+        if (!reachableMoveCache.ContainsKey(gridPos)) return;
+        if (gridPos == activeUnit.GridPos) return;
 
-        void OnHit()
+        StartCoroutine(PlayerMoveRoutine(gridPos));
+    }
+    public void OnHoverTile(Vector2Int gridPos)
+    {
+        // Hover는 "스킬 미리보기 + ClickTileAOE"에서만 동작
+        if (battleEnded) return;
+        if (activeUnit == null || activeUnit.IsDead) return;
+        if (inputMode != PlayerInputMode.SkillPreview) return;
+        if (selectedSkill == null) return;
+        if (selectedSkill.targetMode != SkillTargetMode.ClickTileAOE) return;
+        if (tileHighlighter == null) return;
+
+        if (hoverTile.HasValue && hoverTile.Value == gridPos) return;
+        hoverTile = gridPos;
+
+        // 중심 타일이 사거리 내인지 체크 (사거리 밖이면 표시 제거)
+        int d = Mathf.Abs(activeUnit.GridPos.x - gridPos.x) + Mathf.Abs(activeUnit.GridPos.y - gridPos.y);
+        if (d < selectedSkill.minRange || d > selectedSkill.maxRange)
         {
-            if (hitDone) return;
-            hitDone = true;
+            tileHighlighter.ClearTarget();
+            return;
+        }
 
-            foreach (var t in targets)
+        // aoeRadius (Manhattan) 기반 타겟 타일 계산
+        var tiles = BuildManhattanDisk(gridPos, Mathf.Max(0, selectedSkill.aoeRadius));
+        tileHighlighter.ShowTargetTiles(tiles);
+    }
+
+    public void ClearHoverAOEPreview()
+    {
+        hoverTile = null;
+        if (tileHighlighter != null)
+            tileHighlighter.ClearTarget();
+    }
+
+    List<Vector2Int> BuildManhattanDisk(Vector2Int center, int radius)
+    {
+        var list = new List<Vector2Int>( (radius * 2 + 1) * (radius * 2 + 1) );
+        for (int dx = -radius; dx <= radius; dx++)
+        {
+            int rem = radius - Mathf.Abs(dx);
+            for (int dy = -rem; dy <= rem; dy++)
             {
-                if (t != null && !t.IsDead)
-                    ApplySkillEffects(skill, attacker, t);
+                var p = new Vector2Int(center.x + dx, center.y + dy);
+                list.Add(p);
             }
         }
-
-        void OnEnd() { endDone = true; }
-
-        attacker.AttackHitEvent += OnHit;
-        attacker.AttackEndEvent += OnEnd;
-
-        attacker.PlayAttack(skill.animationTrigger);
-
-        float timeout = 1.5f;
-        float t = 0f;
-
-        if (skill.timing == SkillTiming.Immediate)
-        {
-            foreach (var tt in targets)
-            {
-                if (tt != null && !tt.IsDead)
-                    ApplySkillEffects(skill, attacker, tt);
-            }
-            hitDone = true;
-        }
-        else if (skill.timing == SkillTiming.OnAttackHit)
-        {
-            while (!hitDone && t < timeout)
-            {
-                t += Time.deltaTime;
-                yield return null;
-            }
-        }
-        else if (skill.timing == SkillTiming.OnAttackEnd)
-        {
-            while (!endDone && t < timeout)
-            {
-                t += Time.deltaTime;
-                yield return null;
-            }
-            if (!hitDone)
-            {
-                foreach (var tt in targets)
-                {
-                    if (tt != null && !tt.IsDead)
-                        ApplySkillEffects(skill, attacker, tt);
-                }
-                hitDone = true;
-            }
-        }
-
-        t = 0f;
-        while (!endDone && t < timeout)
-        {
-            t += Time.deltaTime;
-            yield return null;
-        }
-
-        attacker.AttackHitEvent -= OnHit;
-        attacker.AttackEndEvent -= OnEnd;
-
-        // 선택 상태 초기화(중요)
-        selectedSkill = null;
-        selectedSkillIndex = -1;
-        inputMode = PlayerInputMode.Move;
-
-        onComplete?.Invoke();
+        return list;
     }
 }

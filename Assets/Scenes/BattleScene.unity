@@ -1315,7 +1315,7 @@ MonoBehaviour:
   - {fileID: 893815997}
   - {fileID: 1995237304}
   playerSkills:
-  - {fileID: 11400000, guid: f2e3c4a94cb75834d872d0cbecb5c653, type: 2}
+  - {fileID: 11400000, guid: 5fd3170e741a8444ab9c434c90910357, type: 2}
   - {fileID: 11400000, guid: 0fb74262a9168664a807f80f94399e5d, type: 2}
   - {fileID: 11400000, guid: ea89c57c170412f449b0458709239a3c, type: 2}
   enemySkills:
