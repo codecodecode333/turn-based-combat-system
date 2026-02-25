@@ -65,12 +65,24 @@ public class BattleController : MonoBehaviour
         if (selectedSkill != null &&
             Keyboard.current != null &&
             Keyboard.current.escapeKey.wasPressedThisFrame)
-        {
+        {   
             selectedSkill = null;
             selectedSkillIndex = -1;
             ClearPreviewTargetIndicators();
-            if (tileHighlighter)
-                tileHighlighter.ShowReachableMoveTiles(activeUnit);
+
+            waitingInput = true;
+            inputMode = PlayerInputMode.Move;
+
+            if (!hasMovedThisTurn)
+            {
+                // 4) 이동 캐시 갱신 + Blue 표시 (표시=판정)
+                if (tileHighlighter) tileHighlighter.ShowReachableMoveTiles(activeUnit);
+            }
+            else
+            {
+                // 이미 이동했으면 이동 범위는 다시 보여주지 않음
+                if (tileHighlighter) tileHighlighter.ClearAll();
+            }   
         }
     }
 
@@ -229,8 +241,8 @@ public class BattleController : MonoBehaviour
         {
             // 플레이어 입력 턴
             waitingInput = true;
-            SetSkillButtonsInteractable(true);
             hasMovedThisTurn = false;
+            SetSkillButtonsInteractable(true);
             reachableMoveCache = grid.GetReachableCosts(activeUnit, activeUnit.moveRange);
             inputMode = PlayerInputMode.Move;
             // ✅ 입력 대기 상태에서만 표시
@@ -316,6 +328,7 @@ public class BattleController : MonoBehaviour
         // ✅ 1클릭: 선택 + 사거리 표시(RED)
         selectedSkill = skill;
         selectedSkillIndex = skillIndex;
+        inputMode = PlayerInputMode.SkillPreview;
 
         // (필드명이 다르면 여기만 바꿔)
         int minR = skill.minRange;
@@ -827,5 +840,126 @@ public class BattleController : MonoBehaviour
         hasMovedThisTurn = true;
         inputMode = PlayerInputMode.SkillPreview; // 또는 Move가 아닌 상태로(스킬/대기 선택 단계)
         reachableMoveCache = null;
+    }
+
+    public void OnUnitClicked(Unit clicked)
+    {
+        if (battleEnded) return;
+        if (!waitingInput || busy) return;
+        if (activeUnit == null || activeUnit.IsDead) return;
+        if (!IsAlly(activeUnit)) return; // 플레이어 턴에서만
+
+        // ✅ 스킬 미리보기 모드일 때만 처리
+        if (inputMode != PlayerInputMode.SkillPreview) return;
+        if (selectedSkill == null) return;
+        if (clicked == null || clicked.IsDead) return;
+
+        // 아군 클릭은 무시(원하면 힐/버프 스킬 때 확장)
+        if (IsAlly(clicked)) return;
+
+        // ✅ RunSkill과 동일 기준으로 “클릭 타겟이 실제 타겟 후보인지” 검증
+        var resolved = ResolveTargets(selectedSkill, activeUnit, GetCasterAllies(activeUnit), GetCasterEnemies(activeUnit));
+        bool ok = false;
+        for (int i = 0; i < resolved.Count; i++)
+        {
+            if (resolved[i] == clicked) { ok = true; break; }
+        }
+        if (!ok) return; // 사거리 밖/조건 불만족
+
+        // ✅ 여기서 즉시 발동(클릭 타겟을 강제)
+        StartCoroutine(RunSkillForcedTarget(activeUnit, selectedSkill, clicked, OnActionComplete));
+    }
+
+    IEnumerator RunSkillForcedTarget(Unit attacker, SkillData skill, Unit forcedTarget, System.Action onComplete)
+    {
+        if (attacker == null || skill == null || forcedTarget == null)
+        {
+            onComplete?.Invoke();
+            yield break;
+        }
+
+        // UX 정리(타일/아이콘 등)
+        if (tileHighlighter) tileHighlighter.ClearAll();
+        ClearPreviewTargetIndicators(); // 네가 타겟 아이콘 토글 구현했다면
+
+        // 강제 타겟 리스트
+        List<Unit> targets = new List<Unit> { forcedTarget };
+
+        bool hitDone = false;
+        bool endDone = false;
+
+        void OnHit()
+        {
+            if (hitDone) return;
+            hitDone = true;
+
+            foreach (var t in targets)
+            {
+                if (t != null && !t.IsDead)
+                    ApplySkillEffects(skill, attacker, t);
+            }
+        }
+
+        void OnEnd() { endDone = true; }
+
+        attacker.AttackHitEvent += OnHit;
+        attacker.AttackEndEvent += OnEnd;
+
+        attacker.PlayAttack(skill.animationTrigger);
+
+        float timeout = 1.5f;
+        float t = 0f;
+
+        if (skill.timing == SkillTiming.Immediate)
+        {
+            foreach (var tt in targets)
+            {
+                if (tt != null && !tt.IsDead)
+                    ApplySkillEffects(skill, attacker, tt);
+            }
+            hitDone = true;
+        }
+        else if (skill.timing == SkillTiming.OnAttackHit)
+        {
+            while (!hitDone && t < timeout)
+            {
+                t += Time.deltaTime;
+                yield return null;
+            }
+        }
+        else if (skill.timing == SkillTiming.OnAttackEnd)
+        {
+            while (!endDone && t < timeout)
+            {
+                t += Time.deltaTime;
+                yield return null;
+            }
+            if (!hitDone)
+            {
+                foreach (var tt in targets)
+                {
+                    if (tt != null && !tt.IsDead)
+                        ApplySkillEffects(skill, attacker, tt);
+                }
+                hitDone = true;
+            }
+        }
+
+        t = 0f;
+        while (!endDone && t < timeout)
+        {
+            t += Time.deltaTime;
+            yield return null;
+        }
+
+        attacker.AttackHitEvent -= OnHit;
+        attacker.AttackEndEvent -= OnEnd;
+
+        // 선택 상태 초기화(중요)
+        selectedSkill = null;
+        selectedSkillIndex = -1;
+        inputMode = PlayerInputMode.Move;
+
+        onComplete?.Invoke();
     }
 }
