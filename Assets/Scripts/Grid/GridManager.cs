@@ -265,6 +265,96 @@ public class GridManager : MonoBehaviour
         return result;
     }
 
+    public struct ReachableData
+    {
+        public Dictionary<Vector2Int, int> cost;
+        public Dictionary<Vector2Int, Vector2Int> cameFrom;
+    }
+
+    public ReachableData GetReachableData(Unit mover, int moveRange)
+    {
+        var cost = new Dictionary<Vector2Int, int>();
+        var cameFrom = new Dictionary<Vector2Int, Vector2Int>();
+        if (mover == null) return new ReachableData { cost = cost, cameFrom = cameFrom };
+
+        Vector2Int start = mover.GridPos;
+        var q = new Queue<Vector2Int>();
+
+        cost[start] = 0;
+        q.Enqueue(start);
+
+        while (q.Count > 0)
+        {
+            var cur = q.Dequeue();
+            int curCost = cost[cur];
+
+            if (curCost >= moveRange) continue;
+
+            foreach (var nb in GetNeighbors4(cur))
+            {
+                if (!CanStandFor(mover, nb)) continue;
+
+                int nextCost = curCost + 1;
+                if (nextCost > moveRange) continue;
+
+                // 더 좋은(짧은) 경로로 갱신
+                if (cost.TryGetValue(nb, out int oldCost) && oldCost <= nextCost) continue;
+
+                cost[nb] = nextCost;
+                cameFrom[nb] = cur;
+                q.Enqueue(nb);
+            }
+        }
+
+        return new ReachableData { cost = cost, cameFrom = cameFrom };
+    }
+
+    public List<Vector2Int> ReconstructPath(Vector2Int start, Vector2Int goal, Dictionary<Vector2Int, Vector2Int> cameFrom)
+    {
+        if (start == goal) return new List<Vector2Int>();
+        if (cameFrom == null || !cameFrom.ContainsKey(goal)) return null;
+
+        var path = new List<Vector2Int>();
+        var cur = goal;
+        while (cur != start)
+        {
+            path.Add(cur);
+            cur = cameFrom[cur];
+        }
+        path.Reverse();
+        return path;
+    }
+
+    /// <summary>
+    /// mover가 moveRange 안에서 goal까지 갈 수 있으면 최단 경로를 반환한다.
+    /// (갈 수 없으면 null)
+    /// </summary>
+    public List<Vector2Int> FindPathWithinRange(Unit mover, Vector2Int goal, int moveRange)
+    {
+        if (mover == null) return null;
+        var data = GetReachableData(mover, moveRange);
+        return ReconstructPath(mover.GridPos, goal, data.cameFrom);
+    }
+
+    /// <summary>
+    /// 경로(path)를 따라 1타일씩 이동한다.
+    /// - path는 FindPathWithinRange/ReconstructPath 형태(= start 제외, goal 포함)로 들어오는 것을 전제.
+    /// - 이동 도중 막히면 즉시 중단한다(턴제에서는 보통 충분).
+    /// </summary>
+    public IEnumerator MovePathRoutine(Unit u, List<Vector2Int> path)
+    {
+        if (u == null || path == null) yield break;
+
+        foreach (var step in path)
+        {
+            // 동적 점유(다른 유닛이 들어온 경우 등) 대비: 스텝마다 검증
+            if (!CanStandFor(u, step)) yield break;
+            // 기존 MoveRoutine은 논리 이동 확정 + 보간 이동
+            yield return StartCoroutine(MoveRoutine(u, step));
+        }
+    }
+
+
 #if UNITY_EDITOR
     void OnDrawGizmos()
     {

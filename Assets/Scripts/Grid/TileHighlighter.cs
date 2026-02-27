@@ -8,12 +8,14 @@ public class TileHighlighter : MonoBehaviour
 
     [Header("Prefabs")]
     public GameObject moveTilePrefab;   // Blue
+    public GameObject pathTilePrefab;     // Blue Strong (강조)
     public GameObject rangePrefab;      // Red (사거리)
     public GameObject targetPrefab;     // Red Strong (타겟 강조)  <-- 추가
 
     private readonly Dictionary<Vector2Int, GameObject> moveActive  = new(128);
     private readonly Dictionary<Vector2Int, GameObject> rangeActive = new(256);
     private readonly Dictionary<Vector2Int, GameObject> targetActive= new(64);
+    readonly Dictionary<Vector2Int, GameObject> pathActive = new(64);
 
     void Awake()
     {
@@ -52,6 +54,21 @@ public class TileHighlighter : MonoBehaviour
         var costs = grid.GetReachableCosts(unit, unit.moveRange);
         foreach (var p in costs.Keys)
             SpawnTile(p, moveTilePrefab, moveActive);
+    }
+
+    public void ShowMoveTiles(IEnumerable<Vector2Int> moveTiles)
+    {
+        if (!grid) grid = GridManager.I;
+        if (!grid || !moveTilePrefab) return;
+
+        ClearAll();
+        if (moveTiles == null) return;
+
+        foreach (var p in moveTiles)
+        {
+            if (!grid.InBounds(p)) continue;
+            SpawnTile(p, moveTilePrefab, moveActive);
+        }
     }
 
     // -------------------------
@@ -101,5 +118,18 @@ public class TileHighlighter : MonoBehaviour
             sr.sortingOrder = -Mathf.RoundToInt(world.y * 100f) - 1;
 
         dict[gridPos] = go;
+    }
+    public void ClearPath() { foreach (var kv in pathActive) if (kv.Value) Destroy(kv.Value); pathActive.Clear(); }
+
+    public void ShowPathTiles(IEnumerable<Vector2Int> tiles)
+    {
+        if (!grid) grid = GridManager.I;
+        if (!grid || !pathTilePrefab) return;
+        ClearPath();
+        foreach (var p in tiles)
+        {
+            if (!grid.InBounds(p) || targetActive.ContainsKey(p)) continue; // ✅ Target 우선
+            SpawnTile(p, pathTilePrefab, pathActive);
+        }
     }
 }

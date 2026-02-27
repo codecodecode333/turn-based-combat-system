@@ -298,6 +298,12 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::BattleInput
   cam: {fileID: 743802538}
   battle: {fileID: 1438724834}
+  clickActionRef: {fileID: 0}
+  pointerPosActionRef: {fileID: 0}
+  raycastMask:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  debugLog: 0
 --- !u!4 &361323195
 Transform:
   m_ObjectHideFlags: 0
@@ -1003,6 +1009,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::TileHighlighter
   grid: {fileID: 1195764739}
   moveTilePrefab: {fileID: 1268857650}
+  pathTilePrefab: {fileID: 0}
   rangePrefab: {fileID: 778548727}
   targetPrefab: {fileID: 1070345009}
 --- !u!4 &1114685926
@@ -2270,10 +2277,10 @@ SceneRoots:
   - {fileID: 1340067171}
   - {fileID: 881355721}
   - {fileID: 1195764740}
-  - {fileID: 1114685926}
   - {fileID: 1877015334945279372}
   - {fileID: 2364159454282015966}
   - {fileID: 7245674783909160889}
   - {fileID: 1224317600245110595}
   - {fileID: 1078217250}
   - {fileID: 361323195}
+  - {fileID: 1114685926}

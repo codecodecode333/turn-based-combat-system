@@ -19,6 +19,7 @@ public class BattleInput : MonoBehaviour
     private InputAction clickAction;
     private InputAction pointerPosAction;
     private Vector2Int? lastHoverTile;
+    private Vector2Int? lastHoverMoveTile;
 
     void Awake()
     {
@@ -53,16 +54,16 @@ public class BattleInput : MonoBehaviour
             skill != null &&
             skill.targetMode == SkillTargetMode.ClickTileAOE);
 
-        if (!hoverAOE)
+        bool hoverMove =
+            (battle.IsWaitingInput && !battle.IsBusy &&
+            mode == BattleController.PlayerInputMode.Move);
+        
+        if (!hoverAOE && !hoverMove)
         {
-            if (lastHoverTile.HasValue)
-            {
-                lastHoverTile = null;
-                battle.ClearHoverAOEPreview();
-            }
+            if (lastHoverTile.HasValue) { lastHoverTile = null; battle.ClearHoverAOEPreview(); }
+            if (lastHoverMoveTile.HasValue) { lastHoverMoveTile = null; battle.ClearHoverMovePathPreview(); }
             return;
         }
-
         // 포인터 위치 -> 월드 -> RaycastAll
         Vector2 screen = pointerPosAction.ReadValue<Vector2>();
         Vector3 world = cam.ScreenToWorldPoint(new Vector3(screen.x, screen.y, 0f));
@@ -84,19 +85,41 @@ public class BattleInput : MonoBehaviour
 
         if (hitTile == null)
         {
-            if (lastHoverTile.HasValue)
+            if (hitTile == null)
             {
-                lastHoverTile = null;
-                battle.ClearHoverAOEPreview();
+                if (hoverAOE && lastHoverTile.HasValue) { lastHoverTile = null; battle.ClearHoverAOEPreview(); }
+                if (hoverMove && lastHoverMoveTile.HasValue) { lastHoverMoveTile = null; battle.ClearHoverMovePathPreview(); }
+                return;
             }
-            return;
         }
 
         var gp = hitTile.GridPos;
-        if (!lastHoverTile.HasValue || lastHoverTile.Value != gp)
+        if (hoverAOE)
         {
-            lastHoverTile = gp;
-            battle.OnHoverTile(gp);
+            if (!lastHoverTile.HasValue || lastHoverTile.Value != gp)
+            {
+                lastHoverTile = gp;
+                battle.OnHoverTile(gp);
+            }
+        }
+        else if (lastHoverTile.HasValue)
+        {
+            lastHoverTile = null;
+            battle.ClearHoverAOEPreview();
+        }
+
+        if (hoverMove)
+        {
+            if (!lastHoverMoveTile.HasValue || lastHoverMoveTile.Value != gp)
+            {
+                lastHoverMoveTile = gp;
+                battle.OnHoverMoveTile(gp);
+            }
+        }
+        else if (lastHoverMoveTile.HasValue)
+        {
+            lastHoverMoveTile = null;
+            battle.ClearHoverMovePathPreview();
         }
     }
     void OnEnable()

@@ -13,6 +13,8 @@ public class BattleController : MonoBehaviour
     SkillData selectedSkill = null;
     int selectedSkillIndex = -1;
     Dictionary<Vector2Int,int> reachableMoveCache;
+    Dictionary<Vector2Int, Vector2Int> reachableMoveCameFromCache;
+    Vector2Int? hoverMoveTile;
 
     [Header("Teams")]
     public List<Unit> allies = new List<Unit>();
@@ -62,7 +64,6 @@ public class BattleController : MonoBehaviour
     public SkillData SelectedSkill => selectedSkill;
     public Unit ActiveUnit => activeUnit;
     private Vector2Int? hoverTile = null;
-
 
     void Start()
     {
@@ -255,10 +256,12 @@ public class BattleController : MonoBehaviour
             waitingInput = true;
             hasMovedThisTurn = false;
             SetSkillButtonsInteractable(true);
-            reachableMoveCache = grid.GetReachableCosts(activeUnit, activeUnit.moveRange);
+            var data = grid.GetReachableData(activeUnit, activeUnit.moveRange);
+            reachableMoveCache = data.cost;
+            reachableMoveCameFromCache = data.cameFrom;
             inputMode = PlayerInputMode.Move;
             // ✅ 입력 대기 상태에서만 표시
-            if (tileHighlighter) tileHighlighter.ShowReachableMoveTiles(activeUnit);
+            if (tileHighlighter) tileHighlighter.ShowMoveTiles(reachableMoveCache.Keys);
         }
         else
         {
@@ -350,6 +353,7 @@ public class BattleController : MonoBehaviour
         // 하이라이트 초기화
         if (tileHighlighter) tileHighlighter.ClearAll();
         reachableMoveCache = null;
+        reachableMoveCameFromCache = null;
         // 1클릭: 사거리 표시(RED)
         var tiles = BuildManhattanRangeTiles(activeUnit.GridPos, minR, maxR);
         if (tileHighlighter) tileHighlighter.ShowRangeTiles(tiles);
@@ -690,7 +694,11 @@ public class BattleController : MonoBehaviour
         //평가 디버그
         Debug.Log($"[AI PLAN] {enemy.name} tile={plan.moveTile} skill={(plan.skill ? plan.skill.skillName : "null")} target={(plan.target ? plan.target.name : "null")} score={plan.score:0.00}");
         if (plan.moveTile != enemy.GridPos)
-            yield return grid.MoveRoutine(enemy, plan.moveTile);
+        {
+                var path = grid.FindPathWithinRange(enemy, plan.moveTile, enemy.moveRange);
+                if (path != null)
+                    yield return StartCoroutine(grid.MovePathRoutine(enemy, path));
+        }    
 
         yield return RunSkill(enemy, plan.skill, onComplete);
     }
@@ -876,8 +884,28 @@ public class BattleController : MonoBehaviour
         // 이동 하이라이트 제거
         if (tileHighlighter) tileHighlighter.ClearAll();
 
-        // 실제 이동 (논리 이동은 GridManager.MoveRoutine이 담당)
-        yield return StartCoroutine(grid.MoveRoutine(activeUnit, to));
+        // // 실제 이동: 최단 경로를 따라 1타일씩 이동 (장애물 관통 방지)
+        // var path = grid.FindPathWithinRange(activeUnit, to, activeUnit.moveRange);
+        // if (path == null)
+        // {
+        //     // 도달 불가면 입력 상태로 복귀
+        //     busy = false;
+        //     waitingInput = true;
+        //     SetSkillButtonsInteractable(true);
+        //     yield break;
+        // }
+
+        // 실제 이동: 캐시된 cameFrom으로 최단 경로 복원 후 경로 따라 이동
+        var path = grid.ReconstructPath(activeUnit.GridPos, to, reachableMoveCameFromCache);
+        if (path == null)
+        {
+            // 도달 불가(캐시가 없거나 목표가 범위 밖 등)면 입력 복귀
+            busy = false;
+            waitingInput = true;
+            SetSkillButtonsInteractable(true);
+            yield break;
+        }
+        yield return StartCoroutine(grid.MovePathRoutine(activeUnit, path));
 
         // 이동 후: "행동 선택 상태"로 복귀
         busy = false;
@@ -892,6 +920,7 @@ public class BattleController : MonoBehaviour
         hasMovedThisTurn = true;
         inputMode = PlayerInputMode.SkillPreview; // 또는 Move가 아닌 상태로(스킬/대기 선택 단계)
         reachableMoveCache = null;
+        reachableMoveCameFromCache = null;
     }
 
     public void OnUnitClicked(Unit clicked)
@@ -953,8 +982,12 @@ public class BattleController : MonoBehaviour
         if (hasMovedThisTurn) return;
         if (inputMode != PlayerInputMode.Move) return;
 
-        if (reachableMoveCache == null)
-            reachableMoveCache = grid.GetReachableCosts(activeUnit, activeUnit.moveRange);
+        if (reachableMoveCache == null || reachableMoveCameFromCache == null)
+        {
+            var data = grid.GetReachableData(activeUnit, activeUnit.moveRange);
+            reachableMoveCache = data.cost;
+            reachableMoveCameFromCache = data.cameFrom;
+        }
 
         if (!reachableMoveCache.ContainsKey(gridPos)) return;
         if (gridPos == activeUnit.GridPos) return;
@@ -1007,5 +1040,58 @@ public class BattleController : MonoBehaviour
             }
         }
         return list;
+    }
+
+    public void OnHoverMoveTile(Vector2Int gridPos)
+    {
+        if (battleEnded) return;
+        if (activeUnit == null || activeUnit.IsDead) return;
+        if (inputMode != PlayerInputMode.Move) return;
+        if (tileHighlighter == null) return;
+
+        // 캐시 없으면(정상 흐름이면 거의 없음) 생성
+        if (reachableMoveCache == null || reachableMoveCameFromCache == null)
+        {
+            var data = grid.GetReachableData(activeUnit, activeUnit.moveRange);
+            reachableMoveCache = data.cost;
+            reachableMoveCameFromCache = data.cameFrom;
+        }
+
+        // 도달 가능 타일만 프리뷰
+        if (!reachableMoveCache.ContainsKey(gridPos))
+        {
+            tileHighlighter.ClearTarget();
+            hoverMoveTile = null;
+            return;
+        }
+
+        // 본인 타일이면 프리뷰 끔
+        if (gridPos == activeUnit.GridPos)
+        {
+            tileHighlighter.ClearTarget();
+            hoverMoveTile = null;
+            return;
+        }
+
+        if (hoverMoveTile.HasValue && hoverMoveTile.Value == gridPos) return;
+        hoverMoveTile = gridPos;
+
+        // ✅ 최단 경로 복원 (start 제외, goal 포함)
+        var path = grid.ReconstructPath(activeUnit.GridPos, gridPos, reachableMoveCameFromCache);
+        if (path == null || path.Count == 0)
+        {
+            tileHighlighter.ClearTarget();
+            return;
+        }
+
+        // Move 모드에서는 highlight 레이어를 "경로 라인"으로 재활용
+        tileHighlighter.ShowMoveTiles(path);
+    }
+
+    public void ClearHoverMovePathPreview()
+    {
+        hoverMoveTile = null;
+        if (tileHighlighter != null)
+            tileHighlighter.ClearTarget();
     }
 }
