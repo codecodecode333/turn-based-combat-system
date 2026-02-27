@@ -64,7 +64,11 @@ public class MoveTowardNearestEnemyEffect : SkillEffect
         }
 
         if (best != attacker.GridPos)
-            attacker.StartCoroutine(grid.MoveRoutine(attacker, best));
+        {
+            var path = grid.FindPathWithinRange(attacker, best, attacker.moveRange);
+            if (path != null)
+                attacker.StartCoroutine(grid.MovePathRoutine(attacker, path));
+        }
     }
 
     List<Vector2Int> GetReachableTiles(GridManager grid, Vector2Int start, int range)
