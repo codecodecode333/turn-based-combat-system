@@ -1009,7 +1009,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::TileHighlighter
   grid: {fileID: 1195764739}
   moveTilePrefab: {fileID: 1268857650}
-  pathTilePrefab: {fileID: 0}
+  pathTilePrefab: {fileID: 8474163127165659146, guid: 426b427ace37d044eb540f229e0c8ad2, type: 3}
   rangePrefab: {fileID: 778548727}
   targetPrefab: {fileID: 1070345009}
 --- !u!4 &1114685926
@@ -2242,6 +2242,10 @@ PrefabInstance:
       propertyPath: targetIndicator
       value: 
       objectReference: {fileID: 8601094974122874342}
+    - target: {fileID: 6912995081859625821, guid: 0402c8c641b24064b8202c3b1c47fa13, type: 3}
+      propertyPath: moveRange
+      value: 4
+      objectReference: {fileID: 0}
     - target: {fileID: 8325293502993455063, guid: 0402c8c641b24064b8202c3b1c47fa13, type: 3}
       propertyPath: m_SortingLayer
       value: 3

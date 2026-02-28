@@ -9,7 +9,7 @@ public class BattleInput : MonoBehaviour
 
     [Header("Input Actions (Optional)")]
     // 프로젝트에 Input Actions 에셋을 쓰는 경우 여기에 연결해도 됨
-    [SerializeField] private InputActionReference clickActionRef;     // 예: <Pointer>/press
+    [SerializeField] private InputActionReference clickActionRef;      // 예: <Pointer>/press
     [SerializeField] private InputActionReference pointerPosActionRef; // 예: <Pointer>/position
 
     [Header("Raycast")]
@@ -18,8 +18,10 @@ public class BattleInput : MonoBehaviour
 
     private InputAction clickAction;
     private InputAction pointerPosAction;
-    private Vector2Int? lastHoverTile;
-    private Vector2Int? lastHoverMoveTile;
+
+    // Hover state
+    private Vector2Int? lastHoverTile;      // AOE hover tile
+    private Vector2Int? lastHoverMoveTile;  // Move hover tile
 
     void Awake()
     {
@@ -41,6 +43,7 @@ public class BattleInput : MonoBehaviour
             pointerPosAction = new InputAction("PointerPos", InputActionType.Value, "<Pointer>/position");
         }
     }
+
     void Update()
     {
         if (cam == null || battle == null) return;
@@ -50,20 +53,22 @@ public class BattleInput : MonoBehaviour
 
         bool hoverAOE =
             (battle.IsWaitingInput && !battle.IsBusy &&
-            mode == BattleController.PlayerInputMode.SkillPreview &&
-            skill != null &&
-            skill.targetMode == SkillTargetMode.ClickTileAOE);
+             mode == BattleController.PlayerInputMode.SkillPreview &&
+             skill != null &&
+             skill.targetMode == SkillTargetMode.ClickTileAOE);
 
         bool hoverMove =
             (battle.IsWaitingInput && !battle.IsBusy &&
-            mode == BattleController.PlayerInputMode.Move);
-        
+             mode == BattleController.PlayerInputMode.Move);
+
+        // hover 조건이 둘 다 아니면, 남아있는 프리뷰를 확실히 정리
         if (!hoverAOE && !hoverMove)
         {
-            if (lastHoverTile.HasValue) { lastHoverTile = null; battle.ClearHoverAOEPreview(); }
-            if (lastHoverMoveTile.HasValue) { lastHoverMoveTile = null; battle.ClearHoverMovePathPreview(); }
+            ClearAOEHoverIfNeeded();
+            ClearMoveHoverIfNeeded();
             return;
         }
+
         // 포인터 위치 -> 월드 -> RaycastAll
         Vector2 screen = pointerPosAction.ReadValue<Vector2>();
         Vector3 world = cam.ScreenToWorldPoint(new Vector3(screen.x, screen.y, 0f));
@@ -83,17 +88,17 @@ public class BattleInput : MonoBehaviour
             }
         }
 
+        // 타일을 못 맞추면: 해당 hover만 정리
         if (hitTile == null)
         {
-            if (hitTile == null)
-            {
-                if (hoverAOE && lastHoverTile.HasValue) { lastHoverTile = null; battle.ClearHoverAOEPreview(); }
-                if (hoverMove && lastHoverMoveTile.HasValue) { lastHoverMoveTile = null; battle.ClearHoverMovePathPreview(); }
-                return;
-            }
+            if (hoverAOE) ClearAOEHoverIfNeeded();
+            if (hoverMove) ClearMoveHoverIfNeeded();
+            return;
         }
 
         var gp = hitTile.GridPos;
+
+        // ---- AOE hover ----
         if (hoverAOE)
         {
             if (!lastHoverTile.HasValue || lastHoverTile.Value != gp)
@@ -102,12 +107,13 @@ public class BattleInput : MonoBehaviour
                 battle.OnHoverTile(gp);
             }
         }
-        else if (lastHoverTile.HasValue)
+        else
         {
-            lastHoverTile = null;
-            battle.ClearHoverAOEPreview();
+            // AOE hover가 아닌데 잔상이 남아있다면 정리
+            ClearAOEHoverIfNeeded();
         }
 
+        // ---- Move hover ----
         if (hoverMove)
         {
             if (!lastHoverMoveTile.HasValue || lastHoverMoveTile.Value != gp)
@@ -116,12 +122,13 @@ public class BattleInput : MonoBehaviour
                 battle.OnHoverMoveTile(gp);
             }
         }
-        else if (lastHoverMoveTile.HasValue)
+        else
         {
-            lastHoverMoveTile = null;
-            battle.ClearHoverMovePathPreview();
+            // Move hover가 아닌데 잔상이 남아있다면 정리
+            ClearMoveHoverIfNeeded();
         }
     }
+
     void OnEnable()
     {
         if (clickAction != null)
@@ -144,6 +151,28 @@ public class BattleInput : MonoBehaviour
 
         if (pointerPosAction != null)
             pointerPosAction.Disable();
+
+        // ✅ 비활성화/씬전환에서도 잔상 확실히 정리
+        ClearAOEHoverIfNeeded(force: true);
+        ClearMoveHoverIfNeeded(force: true);
+    }
+
+    private void ClearAOEHoverIfNeeded(bool force = false)
+    {
+        if (force || lastHoverTile.HasValue)
+        {
+            lastHoverTile = null;
+            if (battle != null) battle.ClearHoverAOEPreview();
+        }
+    }
+
+    private void ClearMoveHoverIfNeeded(bool force = false)
+    {
+        if (force || lastHoverMoveTile.HasValue)
+        {
+            lastHoverMoveTile = null;
+            if (battle != null) battle.ClearHoverMovePathPreview();
+        }
     }
 
     private void OnClickPerformed(InputAction.CallbackContext ctx)
@@ -182,6 +211,7 @@ public class BattleInput : MonoBehaviour
         // SkillPreview + ClickSingle: 유닛 우선
         var mode = battle.InputMode;
         var skill = battle.SelectedSkill;
+
         bool isAOE = (mode == BattleController.PlayerInputMode.SkillPreview &&
                       skill != null &&
                       skill.targetMode == SkillTargetMode.ClickTileAOE);

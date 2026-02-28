@@ -345,6 +345,7 @@ public class BattleController : MonoBehaviour
         selectedSkill = skill;
         selectedSkillIndex = skillIndex;
         inputMode = PlayerInputMode.SkillPreview;
+        ClearHoverMovePathPreview();
 
         // (필드명이 다르면 여기만 바꿔)
         int minR = skill.minRange;
@@ -1011,6 +1012,7 @@ public class BattleController : MonoBehaviour
         int d = Mathf.Abs(activeUnit.GridPos.x - gridPos.x) + Mathf.Abs(activeUnit.GridPos.y - gridPos.y);
         if (d < selectedSkill.minRange || d > selectedSkill.maxRange)
         {
+            tileHighlighter.ClearTargetOverlay();
             tileHighlighter.ClearTarget();
             return;
         }
@@ -1024,7 +1026,10 @@ public class BattleController : MonoBehaviour
     {
         hoverTile = null;
         if (tileHighlighter != null)
+        {
+            tileHighlighter.ClearTargetOverlay();
             tileHighlighter.ClearTarget();
+        }
     }
 
     List<Vector2Int> BuildManhattanDisk(Vector2Int center, int radius)
@@ -1060,7 +1065,7 @@ public class BattleController : MonoBehaviour
         // 도달 가능 타일만 프리뷰
         if (!reachableMoveCache.ContainsKey(gridPos))
         {
-            tileHighlighter.ClearTarget();
+            tileHighlighter.ClearPath();
             hoverMoveTile = null;
             return;
         }
@@ -1068,7 +1073,7 @@ public class BattleController : MonoBehaviour
         // 본인 타일이면 프리뷰 끔
         if (gridPos == activeUnit.GridPos)
         {
-            tileHighlighter.ClearTarget();
+            tileHighlighter.ClearPath();
             hoverMoveTile = null;
             return;
         }
@@ -1080,18 +1085,22 @@ public class BattleController : MonoBehaviour
         var path = grid.ReconstructPath(activeUnit.GridPos, gridPos, reachableMoveCameFromCache);
         if (path == null || path.Count == 0)
         {
-            tileHighlighter.ClearTarget();
+            tileHighlighter.ClearPath();
             return;
         }
 
-        // Move 모드에서는 highlight 레이어를 "경로 라인"으로 재활용
-        tileHighlighter.ShowMoveTiles(path);
+        // A안: move 타일을 덮어그리지 않고, move 타일 외형을 path 스타일로 임시 승격
+        tileHighlighter.ShowPathTiles(path);
     }
 
     public void ClearHoverMovePathPreview()
     {
         hoverMoveTile = null;
         if (tileHighlighter != null)
-            tileHighlighter.ClearTarget();
+        {
+            // A안: range 타일 승격(overlay) 원복 + 별도 target 타일 제거
+            tileHighlighter.ClearTargetOverlay();
+            tileHighlighter.ClearPath();
+        }
     }
 }
