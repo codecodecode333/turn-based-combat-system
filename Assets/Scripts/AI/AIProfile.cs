@@ -22,4 +22,8 @@ public class AIProfile : ScriptableObject
 
     [Header("Approach")]
     public float weightApproach = 0.8f; // 공격 불가 시 접근 유도 (값 클수록 더 잘 붙음)
+
+    [Header("Ranged Spacing")]
+    public float weightKeepRange = 2.1f;   // 사거리 밴드 밖이면 페널티 (클수록 거리 유지)
+    public int keepRangeBuffer = 1;        // 너무 끝사거리/너무 근접 피하려는 완충
 }

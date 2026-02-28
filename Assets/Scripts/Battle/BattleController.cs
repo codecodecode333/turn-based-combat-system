@@ -654,7 +654,6 @@ public class BattleController : MonoBehaviour
             onComplete?.Invoke();
             yield break;
         }
-
         if (!grid) grid = GridManager.I;
 
         var profile = (enemy.aiProfile != null) ? enemy.aiProfile : enemyAIProfile;
@@ -692,16 +691,23 @@ public class BattleController : MonoBehaviour
             profile,
             playerSkills   // 적 기준 상대 스킬풀(Threat 계산용)
         );
-        //평가 디버그
-        Debug.Log($"[AI PLAN] {enemy.name} tile={plan.moveTile} skill={(plan.skill ? plan.skill.skillName : "null")} target={(plan.target ? plan.target.name : "null")} score={plan.score:0.00}");
+        
         if (plan.moveTile != enemy.GridPos)
         {
-                var path = grid.FindPathWithinRange(enemy, plan.moveTile, enemy.moveRange);
-                if (path != null)
-                    yield return StartCoroutine(grid.MovePathRoutine(enemy, path));
-        }    
+            var path = grid.FindPathWithinRange(enemy, plan.moveTile, enemy.moveRange);
+            if (path != null)
+                yield return StartCoroutine(grid.MovePathRoutine(enemy, path));
+        }
 
-        yield return RunSkill(enemy, plan.skill, onComplete);
+        // ✅ 스킬이 없으면 이동만 하고 종료
+        if (plan.skill == null)
+        {
+            onComplete?.Invoke();
+            yield break;
+        }
+        
+        // ✅ 스킬 실행 전에 "AI가 만든 클릭 입력"을 반드시 전달
+        yield return RunSkill(enemy, plan.skill, onComplete, plan.clickedTile, plan.clickedUnit);
     }
 
     bool TryPickBestAttackTile(Unit enemy, SkillData skill, Dictionary<Vector2Int,int> costs, out Vector2Int bestTile)

@@ -145,7 +145,6 @@ public class GridManager : MonoBehaviour
         }
 
         u.transform.position = end;
-        Debug.Log($"[MoveRoutine] {u.name} from={from} to={to} dx={dx} dy={dy} screenXDir={screenXDir}");
         u.SetMoving(false);
         
     }
