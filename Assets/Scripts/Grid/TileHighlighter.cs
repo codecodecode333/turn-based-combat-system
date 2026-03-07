@@ -11,11 +11,15 @@ public class TileHighlighter : MonoBehaviour
     public GameObject pathTilePrefab;     // Blue Strong (강조)
     public GameObject rangePrefab;      // Red (사거리)
     public GameObject targetPrefab;     // Red Strong (타겟 강조)  <-- 추가
+    public GameObject ghostTilePrefab;
+    public GameObject invalidTilePrefab;
 
     private readonly Dictionary<Vector2Int, GameObject> moveActive  = new(128);
     private readonly Dictionary<Vector2Int, GameObject> rangeActive = new(256);
     private readonly Dictionary<Vector2Int, GameObject> targetActive= new(64);
-    //private readonly Dictionary<Vector2Int, GameObject> pathActive = new(64);
+    private readonly Dictionary<Vector2Int, GameObject> pathActive = new(64);
+    private readonly Dictionary<Vector2Int, GameObject> ghostActive = new();
+    private readonly Dictionary<Vector2Int, GameObject> invalidActive = new();
 
     private readonly Dictionary<Vector2Int, (Sprite sprite, Color color)> moveBackup  = new(64);
     private readonly Dictionary<Vector2Int, (Sprite sprite, Color color)> rangeBackup = new(64);
@@ -29,14 +33,19 @@ public class TileHighlighter : MonoBehaviour
 
     public void ClearAll()
     {
-        ClearDict(moveActive);
-        ClearDict(rangeActive);
-        ClearDict(targetActive);
+        ClearMove();
+        ClearRange();
+        ClearTarget();
+        ClearPath();
+        ClearGhost();
+        ClearInvalid();
     }
 
     public void ClearMove()   => ClearDict(moveActive);
     public void ClearRange()  => ClearDict(rangeActive);
     public void ClearTarget() => ClearDict(targetActive);
+    public void ClearGhost() => ClearDict(ghostActive);
+    public void ClearInvalid() => ClearDict(invalidActive);
 
     void ClearDict(Dictionary<Vector2Int, GameObject> dict)
     {
@@ -207,4 +216,27 @@ public class TileHighlighter : MonoBehaviour
             pathOverlaySet.Add(p);
         }
     }
+
+    public void ShowGhostTile(Vector2Int tile)
+    {
+        ClearGhost();
+
+        if (ghostTilePrefab == null) return;
+
+        Vector3 pos = GridManager.I.GridToWorld(tile);
+        var go = Instantiate(ghostTilePrefab, pos, Quaternion.identity, transform);
+        ghostActive[tile] = go;
+    }
+
+    public void ShowInvalidTile(Vector2Int tile)
+    {
+        ClearInvalid();
+
+        if (invalidTilePrefab == null) return;
+
+        Vector3 pos = GridManager.I.GridToWorld(tile);
+        var go = Instantiate(invalidTilePrefab, pos, Quaternion.identity, transform);
+        invalidActive[tile] = go;
+    }
+
 }

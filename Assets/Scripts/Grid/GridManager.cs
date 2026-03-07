@@ -311,15 +311,36 @@ public class GridManager : MonoBehaviour
     public List<Vector2Int> ReconstructPath(Vector2Int start, Vector2Int goal, Dictionary<Vector2Int, Vector2Int> cameFrom)
     {
         if (start == goal) return new List<Vector2Int>();
-        if (cameFrom == null || !cameFrom.ContainsKey(goal)) return null;
+        if (cameFrom == null) return null;
+        if (!cameFrom.ContainsKey(goal)) return null;
 
         var path = new List<Vector2Int>();
         var cur = goal;
+
+        // 무한 루프 / 깨진 체인 방어
+        int guard = 0;
+        const int maxSteps = 512;
+
         while (cur != start)
         {
             path.Add(cur);
-            cur = cameFrom[cur];
+
+            if (!cameFrom.TryGetValue(cur, out var prev))
+            {
+                Debug.LogWarning($"[ReconstructPath] Broken path chain. start={start}, goal={goal}, missing={cur}");
+                return null;
+            }
+
+            cur = prev;
+
+            guard++;
+            if (guard > maxSteps)
+            {
+                Debug.LogWarning($"[ReconstructPath] Guard overflow. start={start}, goal={goal}");
+                return null;
+            }
         }
+
         path.Reverse();
         return path;
     }

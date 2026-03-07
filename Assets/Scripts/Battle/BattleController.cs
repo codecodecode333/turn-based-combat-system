@@ -4,6 +4,7 @@ using UnityEngine;
 using TMPro;
 using UnityEngine.UI;
 using UnityEngine.InputSystem;
+using UnityEngine.EventSystems;
 
 public class BattleController : MonoBehaviour
 {
@@ -50,6 +51,18 @@ public class BattleController : MonoBehaviour
     public bool IsBusy => busy;
     public bool IsWaitingInput => waitingInput;
 
+    //ghost(previewPosition)
+    private Vector2Int? plannedMoveTile = null;      // ghost 위치
+    private SkillData plannedSkill = null;           // 확정 예정 스킬
+    private int plannedSkillIndex = -1;
+    private Vector2Int? plannedClickedTile = null;   // AOE 중심 고정
+    private Unit plannedClickedUnit = null;          // 단일타겟 고정
+
+    public bool HasLockedAOETarget =>
+    plannedSkill != null &&
+    plannedSkill.targetMode == SkillTargetMode.ClickTileAOE &&
+    plannedClickedTile.HasValue;
+
     // 입력 모드
     public enum PlayerInputMode
     {
@@ -69,34 +82,6 @@ public class BattleController : MonoBehaviour
     {
         SetupSkillButtons();
         StartBattle();
-    }
-    void Update()
-    {
-        if (!waitingInput || busy) return;
-
-        if (selectedSkill != null &&
-            Keyboard.current != null &&
-            Keyboard.current.escapeKey.wasPressedThisFrame)
-        {   
-            selectedSkill = null;
-            selectedSkillIndex = -1;
-            ClearPreviewTargetIndicators();
-            ClearHoverAOEPreview();
-
-            waitingInput = true;
-            inputMode = PlayerInputMode.Move;
-
-            if (!hasMovedThisTurn)
-            {
-                // 4) 이동 캐시 갱신 + Blue 표시 (표시=판정)
-                if (tileHighlighter) tileHighlighter.ShowReachableMoveTiles(activeUnit);
-            }
-            else
-            {
-                // 이미 이동했으면 이동 범위는 다시 보여주지 않음
-                if (tileHighlighter) tileHighlighter.ClearAll();
-            }   
-        }
     }
 
     void SetupSkillButtons()
@@ -192,6 +177,8 @@ public class BattleController : MonoBehaviour
 
     void StartNextTurn()
     {
+        reachableMoveCache = null;
+        reachableMoveCameFromCache = null;
         if (battleEnded) return;
 
         // 승패 체크
@@ -220,11 +207,14 @@ public class BattleController : MonoBehaviour
             var cand = turnOrder[turnIndex];
             if (cand != null && !cand.IsDead)
             {
-                activeUnit = cand;                
+                activeUnit = cand;
+                reachableMoveCache = null;
+                reachableMoveCameFromCache = null;                
                 break;
             }
             turnIndex++;
         }
+
         
         activeUnit.OnTurnStart();
         if (activeUnit.IsDead)
@@ -255,6 +245,11 @@ public class BattleController : MonoBehaviour
             // 플레이어 입력 턴
             waitingInput = true;
             hasMovedThisTurn = false;
+            plannedMoveTile = null;
+            plannedSkill = null;
+            plannedSkillIndex = -1;
+            plannedClickedTile = null;
+            plannedClickedUnit = null;
             SetSkillButtonsInteractable(true);
             var data = grid.GetReachableData(activeUnit, activeUnit.moveRange);
             reachableMoveCache = data.cost;
@@ -276,8 +271,11 @@ public class BattleController : MonoBehaviour
     void OnActionComplete()
     {   
         ClearHoverAOEPreview();
+        ClearAllPlannedActions();
         selectedSkill = null;
         selectedSkillIndex = -1;
+        reachableMoveCache = null;
+        reachableMoveCameFromCache = null;
         if (tileHighlighter) tileHighlighter.ClearAll();
         ClearPreviewTargetIndicators();
         // 이번 행동자 처리 완료 → 다음 유닛
@@ -324,60 +322,34 @@ public class BattleController : MonoBehaviour
         SkillData skill = playerSkills[skillIndex];
         if (skill == null) return;
 
-        if (selectedSkill == skill && selectedSkillIndex == skillIndex)
+        // 같은 스킬 다시 누르면 "즉시 실행"이 아니라 "선택 해제"
+        if (plannedSkill == skill && plannedSkillIndex == skillIndex)
         {
-            if (tileHighlighter) tileHighlighter.ClearAll();
-            ClearPreviewTargetIndicators();
-            if (tileHighlighter) tileHighlighter.ClearAll();
-
-            selectedSkill = null;
-            selectedSkillIndex = -1;
-
-            waitingInput = false;
-            busy = true;
-            SetSkillButtonsInteractable(false);
-
-            StartCoroutine(RunSkill(activeUnit, skill, OnActionComplete));
+            ClearPlannedSkill();
+            RefreshPlanningVisuals();
             return;
         }
 
-        // ✅ 1클릭: 선택 + 사거리 표시(RED)
+        // 스킬 계획 저장
+        plannedSkill = skill;
+        plannedSkillIndex = skillIndex;
+
+        // 기존 호환용 상태도 같이 맞춰둠
         selectedSkill = skill;
         selectedSkillIndex = skillIndex;
+
         inputMode = PlayerInputMode.SkillPreview;
+
+        // 이동 hover 잔상 제거
         ClearHoverMovePathPreview();
 
-        // (필드명이 다르면 여기만 바꿔)
-        int minR = skill.minRange;
-        int maxR = skill.maxRange;
+        // 이전 타겟 고정 해제
+        ClearPlannedTarget();
 
-        // 하이라이트 초기화
-        if (tileHighlighter) tileHighlighter.ClearAll();
-        reachableMoveCache = null;
-        reachableMoveCameFromCache = null;
-        // 1클릭: 사거리 표시(RED)
-        var tiles = BuildManhattanRangeTiles(activeUnit.GridPos, minR, maxR);
-        if (tileHighlighter) tileHighlighter.ShowRangeTiles(tiles);
-        ClearPreviewTargetIndicators();
-        ClearHoverAOEPreview();
-        // ✅ RunSkill과 동일 로직으로 타겟 계산
-        var targets = ResolveTargets(skill, activeUnit, GetCasterAllies(activeUnit), GetCasterEnemies(activeUnit), null, null);
-        Debug.Log($"[UseSkill Preview] skill={skill.skillName}, mode={skill.targetMode}, legacyType={skill.targetType}, min={skill.minRange}, max={skill.maxRange}, allies={GetCasterAllies(activeUnit).Count}, enemies={GetCasterEnemies(activeUnit).Count}, targets={targets.Count}");
+        // 화면 갱신
+        RefreshPlanningVisuals();
 
-        // ✅ 타겟 유닛 HUD 아이콘 켜기
-        for (int i = 0; i < targets.Count; i++)
-        {
-            var t = targets[i];
-            if (t == null || t.IsDead) continue;
-
-            var hud = GetHud(t);
-            if (hud) hud.SetTargeted(true);
-
-            previewTargetUnits.Add(t);
-        }
-        // ✅ 3단계: 실제 타겟 강조(진한 RED)
-        var targetTiles = GetPreviewTargetTiles(skill, activeUnit);
-        if (tileHighlighter) tileHighlighter.ShowTargetTiles(targetTiles);
+        EventSystem.current?.SetSelectedGameObject(null);
     }
 
     SkillData ChooseEnemySkill()
@@ -490,6 +462,20 @@ public class BattleController : MonoBehaviour
         Unit clickedUnit = null
     )
     {
+        return ResolveTargetsFromPosition(
+            skill, caster, caster.GridPos, allies, enemies, clickedTile, clickedUnit);
+    }
+
+    List<Unit> ResolveTargetsFromPosition(
+    SkillData skill,
+    Unit caster,
+    Vector2Int casterPos,
+    List<Unit> allies,
+    List<Unit> enemies,
+    Vector2Int? clickedTile = null,
+    Unit clickedUnit = null
+    )
+    {
         var targets = new List<Unit>();
         if (skill == null || caster == null) return targets;
 
@@ -515,9 +501,8 @@ public class BattleController : MonoBehaviour
 
             foreach (var u in Alive(candidates))
             {
-                int d = Dist(caster.GridPos, u.GridPos);
+                int d = Dist(casterPos, u.GridPos);
                 if (d < skill.minRange || d > skill.maxRange) continue;
-
                 if (d < bestDist)
                 {
                     bestDist = d;
@@ -548,17 +533,15 @@ public class BattleController : MonoBehaviour
 
             case SkillTargetMode.ClickSingle:
             {
-                // 확정(클릭)
                 if (clickedUnit != null && !clickedUnit.IsDead)
                 {
-                    if (!allies.Contains(clickedUnit) && InCastRange(caster.GridPos, clickedUnit.GridPos))
+                    if (!allies.Contains(clickedUnit) && InCastRange(casterPos, clickedUnit.GridPos))
                         targets.Add(clickedUnit);
                     break;
                 }
 
-                // 프리뷰(후보)
                 foreach (var e in Alive(enemies))
-                    if (InCastRange(caster.GridPos, e.GridPos))
+                    if (InCastRange(casterPos, e.GridPos))
                         targets.Add(e);
                 break;
             }
@@ -567,9 +550,7 @@ public class BattleController : MonoBehaviour
             {
                 if (!clickedTile.HasValue) break;
                 var center = clickedTile.Value;
-
-                if (!InCastRange(caster.GridPos, center)) break;
-
+                if (!InCastRange(casterPos, center)) break;
                 AddAOEFromCenter(center, enemies);
                 break;
             }
@@ -577,30 +558,26 @@ public class BattleController : MonoBehaviour
             case SkillTargetMode.AllEnemiesInRange:
             {
                 foreach (var e in Alive(enemies))
-                    if (InCastRange(caster.GridPos, e.GridPos))
+                    if (InCastRange(casterPos, e.GridPos))
                         targets.Add(e);
                 break;
             }
 
             case SkillTargetMode.AllEnemiesAnywhere:
-            {
                 targets.AddRange(Alive(enemies));
                 break;
-            }
 
             case SkillTargetMode.AllAlliesInRange:
             {
                 foreach (var a in Alive(allies))
-                    if (InCastRange(caster.GridPos, a.GridPos))
+                    if (InCastRange(casterPos, a.GridPos))
                         targets.Add(a);
                 break;
             }
 
             case SkillTargetMode.AllAlliesAnywhere:
-            {
                 targets.AddRange(Alive(allies));
                 break;
-            }
         }
 
         return targets;
@@ -938,26 +915,25 @@ public class BattleController : MonoBehaviour
         if (!IsAlly(activeUnit)) return;
 
         if (inputMode != PlayerInputMode.SkillPreview) return;
-        if (selectedSkill == null) return;
+        if (plannedSkill == null) return;
         if (clicked == null || clicked.IsDead) return;
+        if (plannedSkill.targetMode != SkillTargetMode.ClickSingle) return;
 
-        // ClickSingle에서만 유닛 클릭을 사용
-        if (selectedSkill.targetMode != SkillTargetMode.ClickSingle)
-            return;
+        var resolved = ResolveTargetsFromPosition(
+            plannedSkill,
+            activeUnit,
+            PreviewPosition,
+            GetCasterAllies(activeUnit),
+            GetCasterEnemies(activeUnit),
+            null,
+            clicked
+        );
 
-        // ✅ ResolveTargets로 클릭 검증 (clickedUnit 넣어서 확정 타겟 계산)
-        var resolved = ResolveTargets(selectedSkill, activeUnit, GetCasterAllies(activeUnit), GetCasterEnemies(activeUnit), null, clicked);
         if (resolved.Count == 0) return;
 
-        // UX 정리
-        if (tileHighlighter) tileHighlighter.ClearAll();
-        ClearPreviewTargetIndicators();
-        ClearHoverAOEPreview();
-        waitingInput = false;
-        busy = true;
-        SetSkillButtonsInteractable(false);
-
-        StartCoroutine(RunSkill(activeUnit, selectedSkill, OnActionComplete, null, clicked));
+        plannedClickedUnit = clicked;
+        plannedClickedTile = null;
+        RefreshPlanningVisuals();
     }
 
     public void OnTileClicked(Vector2Int gridPos)
@@ -971,17 +947,21 @@ public class BattleController : MonoBehaviour
         if (inputMode == PlayerInputMode.SkillPreview && selectedSkill != null &&
             selectedSkill.targetMode == SkillTargetMode.ClickTileAOE)
         {
-            var resolved = ResolveTargets(selectedSkill, activeUnit, GetCasterAllies(activeUnit), GetCasterEnemies(activeUnit), gridPos, null);
+            var resolved = ResolveTargetsFromPosition(
+                plannedSkill,
+                activeUnit,
+                PreviewPosition,
+                GetCasterAllies(activeUnit),
+                GetCasterEnemies(activeUnit),
+                gridPos,
+                null
+            );
+
             if (resolved.Count == 0) return;
 
-            if (tileHighlighter) tileHighlighter.ClearAll();
-            ClearPreviewTargetIndicators();
-            ClearHoverAOEPreview();
-            waitingInput = false;
-            busy = true;
-            SetSkillButtonsInteractable(false);
-
-            StartCoroutine(RunSkill(activeUnit, selectedSkill, OnActionComplete, gridPos, null));
+            plannedClickedTile = gridPos;
+            plannedClickedUnit = null;
+            RefreshPlanningVisuals();
             return;
         }
 
@@ -997,9 +977,15 @@ public class BattleController : MonoBehaviour
         }
 
         if (!reachableMoveCache.ContainsKey(gridPos)) return;
-        if (gridPos == activeUnit.GridPos) return;
+        if (gridPos == activeUnit.GridPos)
+        {
+            ClearPlannedMove();
+            RefreshPlanningVisuals();
+            return;
+        }
 
-        StartCoroutine(PlayerMoveRoutine(gridPos));
+        PlanMove(gridPos);
+        return;
     }
     public void OnHoverTile(Vector2Int gridPos)
     {
@@ -1015,11 +1001,13 @@ public class BattleController : MonoBehaviour
         hoverTile = gridPos;
 
         // 중심 타일이 사거리 내인지 체크 (사거리 밖이면 표시 제거)
-        int d = Mathf.Abs(activeUnit.GridPos.x - gridPos.x) + Mathf.Abs(activeUnit.GridPos.y - gridPos.y);
-        if (d < selectedSkill.minRange || d > selectedSkill.maxRange)
+        int d = Mathf.Abs(PreviewPosition.x - gridPos.x) + Mathf.Abs(PreviewPosition.y - gridPos.y);
+        if (d < plannedSkill.minRange || d > plannedSkill.maxRange)
         {
             tileHighlighter.ClearTargetOverlay();
             tileHighlighter.ClearTarget();
+            // 있으면 invalid overlay 표시
+            tileHighlighter.ShowInvalidTile(gridPos);
             return;
         }
 
@@ -1034,7 +1022,6 @@ public class BattleController : MonoBehaviour
         if (tileHighlighter != null)
         {
             tileHighlighter.ClearTargetOverlay();
-            tileHighlighter.ClearTarget();
         }
     }
 
@@ -1089,13 +1076,31 @@ public class BattleController : MonoBehaviour
 
         // ✅ 최단 경로 복원 (start 제외, goal 포함)
         var path = grid.ReconstructPath(activeUnit.GridPos, gridPos, reachableMoveCameFromCache);
+
+        if (path == null)
+        {
+            // 캐시가 꼬였을 가능성 있으니 1회 재생성
+            var data = grid.GetReachableData(activeUnit, activeUnit.moveRange);
+            reachableMoveCache = data.cost;
+            reachableMoveCameFromCache = data.cameFrom;
+
+            if (!reachableMoveCache.ContainsKey(gridPos))
+            {
+                tileHighlighter.ClearPath();
+                hoverMoveTile = null;
+                return;
+            }
+
+            path = grid.ReconstructPath(activeUnit.GridPos, gridPos, reachableMoveCameFromCache);
+        }
+
         if (path == null || path.Count == 0)
         {
             tileHighlighter.ClearPath();
+            hoverMoveTile = null;
             return;
         }
 
-        // A안: move 타일을 덮어그리지 않고, move 타일 외형을 path 스타일로 임시 승격
         tileHighlighter.ShowPathTiles(path);
     }
 
@@ -1107,6 +1112,311 @@ public class BattleController : MonoBehaviour
             // A안: range 타일 승격(overlay) 원복 + 별도 target 타일 제거
             tileHighlighter.ClearTargetOverlay();
             tileHighlighter.ClearPath();
+        }
+    }
+
+    private Vector2Int PreviewPosition
+    {
+        get
+        {
+            if (plannedMoveTile.HasValue) return plannedMoveTile.Value;
+            return activeUnit != null ? activeUnit.GridPos : Vector2Int.zero;
+        }
+    }
+
+    private bool HasPlannedTarget =>
+        plannedClickedTile.HasValue || plannedClickedUnit != null;
+
+    private void ClearPlannedTarget()
+    {
+        plannedClickedTile = null;
+        plannedClickedUnit = null;
+        ClearPreviewTargetIndicators();
+        ClearHoverAOEPreview();
+    }
+
+    private void ClearPlannedSkill()
+    {
+        plannedSkill = null;
+        plannedSkillIndex = -1;
+        selectedSkill = null;
+        selectedSkillIndex = -1;
+        inputMode = PlayerInputMode.Move;
+        ClearPlannedTarget();
+    }
+
+    private void ClearPlannedMove()
+    {
+        plannedMoveTile = null;
+        hoverMoveTile = null;
+        ClearHoverMovePathPreview();
+
+        // ghost 표시 제거용 메서드가 TileHighlighter에 필요
+        if (tileHighlighter) tileHighlighter.ClearGhost();
+    }
+
+    private void ClearAllPlannedActions()
+    {
+        ClearPlannedSkill();
+        ClearPlannedMove();
+    }
+
+    private void PlanMove(Vector2Int gridPos)
+    {
+        if (reachableMoveCache == null || reachableMoveCameFromCache == null)
+        {
+            var data = grid.GetReachableData(activeUnit, activeUnit.moveRange);
+            reachableMoveCache = data.cost;
+            reachableMoveCameFromCache = data.cameFrom;
+        }
+
+        if (!reachableMoveCache.ContainsKey(gridPos)) return;
+        if (gridPos == activeUnit.GridPos)
+        {
+            ClearPlannedMove();
+            RefreshPlanningVisuals();
+            return;
+        }
+
+        plannedMoveTile = gridPos;
+
+        RefreshPlanningVisuals();
+    }
+
+    private void RefreshPlanningVisuals()
+    {
+        if (tileHighlighter) tileHighlighter.ClearAll();
+        ClearPreviewTargetIndicators();
+        ClearHoverAOEPreview();
+
+        if (activeUnit == null || activeUnit.IsDead) return;
+
+        if (!hasMovedThisTurn && inputMode == PlayerInputMode.Move)
+        {
+            if (reachableMoveCache == null || reachableMoveCameFromCache == null)
+            {
+                var data = grid.GetReachableData(activeUnit, activeUnit.moveRange);
+                reachableMoveCache = data.cost;
+                reachableMoveCameFromCache = data.cameFrom;
+            }
+
+            if (tileHighlighter) tileHighlighter.ShowMoveTiles(reachableMoveCache.Keys);
+
+            if (plannedMoveTile.HasValue)
+            {
+                var path = grid.ReconstructPath(activeUnit.GridPos, plannedMoveTile.Value, reachableMoveCameFromCache);
+
+                if (tileHighlighter)
+                {
+                    if (path != null && path.Count > 0)
+                    {
+                        var body = new List<Vector2Int>(path);
+
+                        // 마지막 칸은 ghost가 담당
+                        body.RemoveAt(body.Count - 1);
+
+                        if (body.Count > 0)
+                            tileHighlighter.ShowPathTiles(body);
+                    }
+
+                    tileHighlighter.ShowGhostTile(plannedMoveTile.Value);
+                }
+            }
+        }
+
+        if (plannedSkill != null)
+        {
+            Vector2Int previewPos = PreviewPosition;
+
+            var rangeTiles = BuildManhattanRangeTiles(previewPos, plannedSkill.minRange, plannedSkill.maxRange);
+            if (tileHighlighter) tileHighlighter.ShowRangeTiles(rangeTiles);
+
+            // 스킬 프리뷰 중에도 예정 경로 + ghost 유지
+            if (plannedMoveTile.HasValue && tileHighlighter)
+            {
+                var path = grid.ReconstructPath(activeUnit.GridPos, plannedMoveTile.Value, reachableMoveCameFromCache);
+
+                if (path != null && path.Count > 0)
+                {
+                    var body = new List<Vector2Int>(path);
+                    body.RemoveAt(body.Count - 1);
+
+                    if (body.Count > 0)
+                        tileHighlighter.ShowPathTiles(body);
+                }
+
+                tileHighlighter.ShowGhostTile(plannedMoveTile.Value);
+            }
+
+            var targets = ResolveTargetsFromPosition(
+                plannedSkill,
+                activeUnit,
+                previewPos,
+                GetCasterAllies(activeUnit),
+                GetCasterEnemies(activeUnit),
+                plannedClickedTile,
+                plannedClickedUnit
+            );
+
+            foreach (var t in targets)
+            {
+                if (t == null || t.IsDead) continue;
+                var hud = GetHud(t);
+                if (hud) hud.SetTargeted(true);
+                previewTargetUnits.Add(t);
+            }
+
+            if (plannedSkill.targetMode == SkillTargetMode.ClickTileAOE && plannedClickedTile.HasValue)
+            {
+                var tiles = BuildManhattanDisk(plannedClickedTile.Value, Mathf.Max(0, plannedSkill.aoeRadius));
+                if (tileHighlighter) tileHighlighter.ShowTargetTiles(tiles);
+            }
+            else
+            {
+                var targetTiles = new HashSet<Vector2Int>();
+                foreach (var t in targets)
+                    if (t != null && !t.IsDead)
+                        targetTiles.Add(t.GridPos);
+
+                if (tileHighlighter) tileHighlighter.ShowTargetTiles(new List<Vector2Int>(targetTiles));
+            }
+        }
+    }
+    
+    public void ConfirmPlannedAction()
+    {
+        if (battleEnded) return;
+        if (!waitingInput || busy) return;
+        if (activeUnit == null || activeUnit.IsDead) return;
+        if (!IsAlly(activeUnit)) return;
+
+        StartCoroutine(ConfirmPlannedActionRoutine());
+    }
+
+    private IEnumerator ConfirmPlannedActionRoutine()
+    {
+        busy = true;
+        waitingInput = false;
+        SetSkillButtonsInteractable(false);
+
+        Vector2Int executeFrom = activeUnit.GridPos;
+
+        bool NeedsExplicitTarget(SkillData skill)
+        {
+            if (skill == null) return false;
+
+            return skill.targetMode == SkillTargetMode.ClickSingle ||
+                skill.targetMode == SkillTargetMode.ClickTileAOE;
+        }
+
+        if (plannedMoveTile.HasValue && plannedMoveTile.Value != activeUnit.GridPos)
+        {
+            var path = grid.ReconstructPath(activeUnit.GridPos, plannedMoveTile.Value, reachableMoveCameFromCache);
+            if (path == null)
+            {
+                busy = false;
+                waitingInput = true;
+                SetSkillButtonsInteractable(true);
+                yield break;
+            }
+
+            if (tileHighlighter) tileHighlighter.ClearAll();
+            yield return StartCoroutine(grid.MovePathRoutine(activeUnit, path));
+            hasMovedThisTurn = true;
+            reachableMoveCache = null;
+            reachableMoveCameFromCache = null;
+            executeFrom = activeUnit.GridPos;
+        }
+
+        if (plannedSkill != null)
+        {
+            if (RequiresExplicitTarget(plannedSkill) &&
+                !HasExplicitPlannedTarget(plannedSkill))
+            {
+                busy = false;
+                waitingInput = true;
+                SetSkillButtonsInteractable(true);
+                yield break;
+            }
+
+            var finalTargets = ResolveTargets(
+                plannedSkill,
+                activeUnit,
+                GetCasterAllies(activeUnit),
+                GetCasterEnemies(activeUnit),
+                plannedClickedTile,
+                plannedClickedUnit
+            );
+
+            if (finalTargets.Count > 0)
+            {
+                yield return RunSkill(
+                    activeUnit,
+                    plannedSkill,
+                    null,
+                    plannedClickedTile,
+                    plannedClickedUnit
+                );
+            }
+        }
+
+        busy = false;
+        waitingInput = false;
+        OnActionComplete();
+    }
+
+    public void CancelPlanningStep()
+    {
+        if (battleEnded) return;
+        if (!waitingInput || busy) return;
+
+        // 1) 타겟 고정 해제
+        if (HasPlannedTarget)
+        {
+            ClearPlannedTarget();
+            RefreshPlanningVisuals();
+            return;
+        }
+
+        // 2) 스킬 선택 해제
+        if (plannedSkill != null)
+        {
+            ClearPlannedSkill();
+            RefreshPlanningVisuals();
+            return;
+        }
+
+        // 3) 이동 ghost 해제
+        if (plannedMoveTile.HasValue)
+        {
+            ClearPlannedMove();
+            RefreshPlanningVisuals();
+            return;
+        }
+    }
+
+    private bool RequiresExplicitTarget(SkillData skill)
+    {
+        if (skill == null) return false;
+
+        return skill.targetMode == SkillTargetMode.ClickSingle ||
+            skill.targetMode == SkillTargetMode.ClickTileAOE;
+    }
+
+    private bool HasExplicitPlannedTarget(SkillData skill)
+    {
+        if (skill == null) return false;
+
+        switch (skill.targetMode)
+        {
+            case SkillTargetMode.ClickSingle:
+                return plannedClickedUnit != null;
+
+            case SkillTargetMode.ClickTileAOE:
+                return plannedClickedTile.HasValue;
+
+            default:
+                return true; // All* / AutoNearestSingle 은 클릭 타겟 불필요
         }
     }
 }

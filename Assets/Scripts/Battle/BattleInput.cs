@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
 
 public class BattleInput : MonoBehaviour
@@ -48,18 +49,47 @@ public class BattleInput : MonoBehaviour
     {
         if (cam == null || battle == null) return;
 
+        // ===== Confirm / Cancel 입력 =====
+        if (Keyboard.current != null)
+        {
+            if (Keyboard.current.enterKey.wasPressedThisFrame ||
+                Keyboard.current.numpadEnterKey.wasPressedThisFrame)
+            {
+                EventSystem.current?.SetSelectedGameObject(null);
+                battle.ConfirmPlannedAction();
+                return;
+            }
+
+            if (Keyboard.current.escapeKey.wasPressedThisFrame)
+            {
+                ClearAOEHoverIfNeeded();
+                ClearMoveHoverIfNeeded();
+                battle.CancelPlanningStep();
+                return;
+            }
+        }
+
+        if (Mouse.current != null && Mouse.current.rightButton.wasPressedThisFrame)
+        {
+            ClearAOEHoverIfNeeded();
+            ClearMoveHoverIfNeeded();
+            battle.CancelPlanningStep();
+            return;
+        }
+
         var mode = battle.InputMode;
         var skill = battle.SelectedSkill;
 
         bool hoverAOE =
             (battle.IsWaitingInput && !battle.IsBusy &&
-             mode == BattleController.PlayerInputMode.SkillPreview &&
-             skill != null &&
-             skill.targetMode == SkillTargetMode.ClickTileAOE);
+            mode == BattleController.PlayerInputMode.SkillPreview &&
+            skill != null &&
+            skill.targetMode == SkillTargetMode.ClickTileAOE &&
+            !battle.HasLockedAOETarget);
 
         bool hoverMove =
             (battle.IsWaitingInput && !battle.IsBusy &&
-             mode == BattleController.PlayerInputMode.Move);
+            mode == BattleController.PlayerInputMode.Move);
 
         // hover 조건이 둘 다 아니면, 남아있는 프리뷰를 확실히 정리
         if (!hoverAOE && !hoverMove)
@@ -109,7 +139,6 @@ public class BattleInput : MonoBehaviour
         }
         else
         {
-            // AOE hover가 아닌데 잔상이 남아있다면 정리
             ClearAOEHoverIfNeeded();
         }
 
@@ -124,7 +153,6 @@ public class BattleInput : MonoBehaviour
         }
         else
         {
-            // Move hover가 아닌데 잔상이 남아있다면 정리
             ClearMoveHoverIfNeeded();
         }
     }
@@ -159,13 +187,15 @@ public class BattleInput : MonoBehaviour
 
     private void ClearAOEHoverIfNeeded(bool force = false)
     {
+        if (!force && battle != null && battle.HasLockedAOETarget)
+            return;
+
         if (force || lastHoverTile.HasValue)
         {
             lastHoverTile = null;
             if (battle != null) battle.ClearHoverAOEPreview();
         }
     }
-
     private void ClearMoveHoverIfNeeded(bool force = false)
     {
         if (force || lastHoverMoveTile.HasValue)
