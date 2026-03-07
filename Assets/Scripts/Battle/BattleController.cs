@@ -1000,6 +1000,9 @@ public class BattleController : MonoBehaviour
         if (hoverTile.HasValue && hoverTile.Value == gridPos) return;
         hoverTile = gridPos;
 
+        tileHighlighter.ClearInvalid();
+        tileHighlighter.ClearTargetOverlay();
+
         // 중심 타일이 사거리 내인지 체크 (사거리 밖이면 표시 제거)
         int d = Mathf.Abs(PreviewPosition.x - gridPos.x) + Mathf.Abs(PreviewPosition.y - gridPos.y);
         if (d < plannedSkill.minRange || d > plannedSkill.maxRange)
@@ -1022,6 +1025,7 @@ public class BattleController : MonoBehaviour
         if (tileHighlighter != null)
         {
             tileHighlighter.ClearTargetOverlay();
+            tileHighlighter.ClearInvalid();
         }
     }
 
