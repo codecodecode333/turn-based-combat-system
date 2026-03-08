@@ -16,6 +16,11 @@ public class Unit : MonoBehaviour
     public int speed = 10;
     public int moveRange = 2;
 
+    [Header("AP")]
+    public int maxAP = 2;
+    public int regenAP = 2;
+    public int currentAP = 0;
+
     [Header("Skills")]
     public SkillData[] skillPoolOverride;
 
@@ -83,6 +88,9 @@ public class Unit : MonoBehaviour
         baseVisualLocalPos = visual.localPosition;
         ApplyFootOffset();
         baseVisualLocalPos = visual.localPosition;
+
+        //AP
+        currentAP = regenAP;
     }
     void OnDrawGizmos()
     {
@@ -208,6 +216,8 @@ public class Unit : MonoBehaviour
     {
         if (IsDead) return;
 
+        RestoreAPOnTurnStart();
+
         // 뒤에서 앞으로 순회(제거 안전)
         for (int i = statusEffects.Count - 1; i >= 0; i--)
         {
@@ -289,5 +299,23 @@ public class Unit : MonoBehaviour
         var s = visual.localScale;
         s.x = baseVisualScaleX * flip;
         visual.localScale = s;
+    }
+
+    public void RestoreAPOnTurnStart()
+    {
+        currentAP = Mathf.Min(maxAP, currentAP + regenAP);
+    }
+
+    public bool CanPayAP(int amount)
+    {
+        return currentAP >= amount;
+    }
+
+    public bool SpendAP(int amount)
+    {
+        if (amount < 0) amount = 0;
+        if (currentAP < amount) return false;
+        currentAP -= amount;
+        return true;
     }
 }

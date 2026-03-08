@@ -321,6 +321,13 @@ public class BattleController : MonoBehaviour
 
         SkillData skill = playerSkills[skillIndex];
         if (skill == null) return;
+        //AP부족시
+        if (activeUnit == null) return;
+        if (!activeUnit.CanPayAP(skill.costAP))
+        {
+            // TODO: AP 부족 피드백
+            return;
+        }
 
         // 같은 스킬 다시 누르면 "즉시 실행"이 아니라 "선택 해제"
         if (plannedSkill == skill && plannedSkillIndex == skillIndex)
@@ -378,6 +385,12 @@ public class BattleController : MonoBehaviour
 
         var targets = ResolveTargets(skill, attacker, GetCasterAllies(attacker), GetCasterEnemies(attacker), clickedTile, clickedUnit);
         if (targets.Count == 0)
+        {
+            onComplete?.Invoke();
+            yield break;
+        }
+
+        if (!attacker.SpendAP(skill.costAP))
         {
             onComplete?.Invoke();
             yield break;
@@ -1340,6 +1353,15 @@ public class BattleController : MonoBehaviour
                 busy = false;
                 waitingInput = true;
                 SetSkillButtonsInteractable(true);
+                yield break;
+            }
+
+            if (!activeUnit.CanPayAP(plannedSkill.costAP))
+            {
+                busy = false;
+                waitingInput = true;
+                SetSkillButtonsInteractable(true);
+                RefreshPlanningVisuals();
                 yield break;
             }
 

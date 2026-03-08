@@ -19,16 +19,6 @@ public enum SkillTargetMode
     AllAlliesAnywhere      // 전체 아군
 }
 
-// (구 enum은 남겨도 되지만, 앞으로 안 쓸 예정이면 나중에 제거)
-public enum SkillTargetType
-{
-    Self,
-    SingleEnemy,
-    SingleAlly,
-    AllEnemies,
-    AllAllies
-}
-
 [CreateAssetMenu(menuName = "Battle/Skill")]
 public class SkillData : ScriptableObject
 {
@@ -51,7 +41,6 @@ public class SkillData : ScriptableObject
     public int minRange = 0;
     public int maxRange = 1;
 
-    // (구 필드 유지 - 나중에 정리)
-    [Header("Target (LEGACY)")]
-    public SkillTargetType targetType;
+    [Header("Cost")]
+    [Min(0)] public int costAP = 1;
 }
