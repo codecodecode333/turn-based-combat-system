@@ -41,6 +41,9 @@ public class SkillData : ScriptableObject
     public int minRange = 0;
     public int maxRange = 1;
 
+    [Header("LOS")]
+    public bool requiresLineOfSight = false;
+
     [Header("Cost")]
     [Min(0)] public int costAP = 1;
 }

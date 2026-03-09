@@ -500,6 +500,21 @@ public class BattleController : MonoBehaviour
             return d >= skill.minRange && d <= skill.maxRange;
         }
 
+        bool HasLOS(Vector2Int from, Vector2Int to)
+        {
+            if (!skill.requiresLineOfSight)
+                return true;
+
+            if (grid == null) return true;
+
+            return grid.HasLineOfSight(from, to);
+        }
+
+        bool CanAffectPoint(Vector2Int from, Vector2Int to)
+        {
+            return InCastRange(from, to) && HasLOS(from, to);
+        }
+
         IEnumerable<Unit> Alive(IEnumerable<Unit> list)
         {
             foreach (var u in list)
@@ -514,6 +529,9 @@ public class BattleController : MonoBehaviour
 
             foreach (var u in Alive(candidates))
             {
+                if (!CanAffectPoint(casterPos, u.GridPos))
+                    continue;
+
                 int d = Dist(casterPos, u.GridPos);
                 if (d < skill.minRange || d > skill.maxRange) continue;
                 if (d < bestDist)
@@ -548,22 +566,29 @@ public class BattleController : MonoBehaviour
             {
                 if (clickedUnit != null && !clickedUnit.IsDead)
                 {
-                    if (!allies.Contains(clickedUnit) && InCastRange(casterPos, clickedUnit.GridPos))
+                    if (!allies.Contains(clickedUnit) &&
+                        CanAffectPoint(casterPos, clickedUnit.GridPos))
+                    {
                         targets.Add(clickedUnit);
+                    }
                     break;
                 }
 
                 foreach (var e in Alive(enemies))
-                    if (InCastRange(casterPos, e.GridPos))
+                {
+                    if (CanAffectPoint(casterPos, e.GridPos))
                         targets.Add(e);
+                }
                 break;
             }
 
             case SkillTargetMode.ClickTileAOE:
             {
                 if (!clickedTile.HasValue) break;
+
                 var center = clickedTile.Value;
-                if (!InCastRange(casterPos, center)) break;
+                if (!CanAffectPoint(casterPos, center)) break;
+
                 AddAOEFromCenter(center, enemies);
                 break;
             }
@@ -571,26 +596,42 @@ public class BattleController : MonoBehaviour
             case SkillTargetMode.AllEnemiesInRange:
             {
                 foreach (var e in Alive(enemies))
-                    if (InCastRange(casterPos, e.GridPos))
+                {
+                    if (CanAffectPoint(casterPos, e.GridPos))
                         targets.Add(e);
+                }
                 break;
             }
 
             case SkillTargetMode.AllEnemiesAnywhere:
-                targets.AddRange(Alive(enemies));
+            {
+                foreach (var e in Alive(enemies))
+                {
+                    if (HasLOS(casterPos, e.GridPos))
+                        targets.Add(e);
+                }
                 break;
+            }
 
             case SkillTargetMode.AllAlliesInRange:
             {
                 foreach (var a in Alive(allies))
-                    if (InCastRange(casterPos, a.GridPos))
+                {
+                    if (CanAffectPoint(casterPos, a.GridPos))
                         targets.Add(a);
+                }
                 break;
             }
 
             case SkillTargetMode.AllAlliesAnywhere:
-                targets.AddRange(Alive(allies));
+            {
+                foreach (var a in Alive(allies))
+                {
+                    if (HasLOS(casterPos, a.GridPos))
+                        targets.Add(a);
+                }
                 break;
+            }
         }
 
         return targets;
@@ -1016,13 +1057,11 @@ public class BattleController : MonoBehaviour
         tileHighlighter.ClearInvalid();
         tileHighlighter.ClearTargetOverlay();
 
-        // 중심 타일이 사거리 내인지 체크 (사거리 밖이면 표시 제거)
-        int d = Mathf.Abs(PreviewPosition.x - gridPos.x) + Mathf.Abs(PreviewPosition.y - gridPos.y);
-        if (d < plannedSkill.minRange || d > plannedSkill.maxRange)
+        bool castable = IsPointCastable(plannedSkill, PreviewPosition, gridPos);
+        if (!castable)
         {
             tileHighlighter.ClearTargetOverlay();
             tileHighlighter.ClearTarget();
-            // 있으면 invalid overlay 표시
             tileHighlighter.ShowInvalidTile(gridPos);
             return;
         }
@@ -1444,5 +1483,27 @@ public class BattleController : MonoBehaviour
             default:
                 return true; // All* / AutoNearestSingle 은 클릭 타겟 불필요
         }
+    }
+
+    bool HasLOSForSkill(SkillData skill, Vector2Int from, Vector2Int to)
+    {
+        if (skill == null) return false;
+        if (!skill.requiresLineOfSight) return true;
+
+        if (!grid) grid = GridManager.I;
+        if (!grid) return false;
+
+        return grid.HasLineOfSight(from, to);
+    }
+
+    bool IsPointCastable(SkillData skill, Vector2Int from, Vector2Int to)
+    {
+        if (skill == null) return false;
+
+        int d = Mathf.Abs(from.x - to.x) + Mathf.Abs(from.y - to.y);
+        if (d < skill.minRange || d > skill.maxRange)
+            return false;
+
+        return HasLOSForSkill(skill, from, to);
     }
 }

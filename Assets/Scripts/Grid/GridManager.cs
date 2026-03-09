@@ -25,6 +25,9 @@ public class GridManager : MonoBehaviour
     private readonly Dictionary<Vector2Int, Unit> occ = new Dictionary<Vector2Int, Unit>();
     // 유닛 -> 좌표 역맵
     private readonly Dictionary<Unit, Vector2Int> unitPos = new Dictionary<Unit, Vector2Int>();
+    //타일 조회
+    Dictionary<Vector2Int, TileView> tiles = new Dictionary<Vector2Int, TileView>();
+
 
     void Awake()
     {
@@ -45,8 +48,12 @@ public class GridManager : MonoBehaviour
         => occ.TryGetValue(p, out var u) ? u : null;
 
     public bool CanStand(Vector2Int p)
-        => InBounds(p) && !IsOccupied(p);
-
+    {
+        if (!InBounds(p)) return false;
+        if (!IsPassableTile(p)) return false;
+        if (IsOccupied(p)) return false;
+        return true;
+    }
     // -----------------------------
     // Placement (Warp)
     // -----------------------------
@@ -216,7 +223,7 @@ public class GridManager : MonoBehaviour
     public bool CanStandFor(Unit mover, Vector2Int p)
     {
         if (!InBounds(p)) return false;
-
+        if (!IsPassableTile(p)) return false;
         // 비어있으면 OK
         if (!occ.TryGetValue(p, out var u) || u == null || u.IsDead) return true;
 
@@ -372,6 +379,87 @@ public class GridManager : MonoBehaviour
             // 기존 MoveRoutine은 논리 이동 확정 + 보간 이동
             yield return StartCoroutine(MoveRoutine(u, step));
         }
+    }
+
+    public TileView GetTile(Vector2Int p)
+    {
+        tiles.TryGetValue(p, out var t);
+        return t;
+    }
+
+    public bool BlocksLOS(Vector2Int p)
+    {
+        var t = GetTile(p);
+        if (t == null) return false;
+        return t.BlocksLOS;
+    }
+
+    public bool HasLineOfSight(Vector2Int from, Vector2Int to)
+    {
+        int x0 = from.x;
+        int y0 = from.y;
+        int x1 = to.x;
+        int y1 = to.y;
+
+        int dx = Mathf.Abs(x1 - x0);
+        int dy = Mathf.Abs(y1 - y0);
+
+        int sx = x0 < x1 ? 1 : -1;
+        int sy = y0 < y1 ? 1 : -1;
+
+        int err = dx - dy;
+
+        while (true)
+        {
+            var p = new Vector2Int(x0, y0);
+
+            if (p != from && p != to)
+            {
+                var tile = GetTileView(p);
+                if (tile != null && tile.tileData != null && tile.tileData.blocksLOS)
+                    return false;
+            }
+
+            if (x0 == x1 && y0 == y1)
+                break;
+
+            int e2 = 2 * err;
+
+            if (e2 > -dy)
+            {
+                err -= dy;
+                x0 += sx;
+            }
+
+            if (e2 < dx)
+            {
+                err += dx;
+                y0 += sy;
+            }
+        }
+
+        return true;
+    }
+
+    public TileView GetTileView(Vector2Int pos)
+    {
+        var views = FindObjectsOfType<TileView>();
+
+        foreach (var v in views)
+        {
+            if (v.GridPos == pos)
+                return v;
+        }
+
+        return null;
+    }
+
+    public bool IsPassableTile(Vector2Int pos)
+    {
+        var tile = GetTileView(pos);
+        if (tile == null) return true; // 타일이 없으면 일단 통과 허용(초기 단계 안전)
+        if (tile.tileData == null) return true;
+        return tile.tileData.passable;
     }
 
 
