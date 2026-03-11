@@ -16,6 +16,9 @@ public class Unit : MonoBehaviour
     public int speed = 10;
     public int moveRange = 2;
 
+    [Header("Movement")]
+    [Min(0)] public int maxClimbDelta = 1;
+
     [Header("AP")]
     public int maxAP = 2;
     public int regenAP = 2;

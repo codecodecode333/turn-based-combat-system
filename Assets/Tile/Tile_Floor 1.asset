@@ -10,9 +10,9 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: e1770670e8a72d74a8e87bc1bf236efb, type: 3}
-  m_Name: Tile_Wall
+  m_Name: Tile_Floor 1
   m_EditorClassIdentifier: Assembly-CSharp::TileData
-  passable: 0
-  blocksLOS: 1
-  heightLevel: 0
+  passable: 1
+  blocksLOS: 0
+  heightLevel: 1
   hazardType: 

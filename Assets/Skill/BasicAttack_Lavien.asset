@@ -21,4 +21,5 @@ MonoBehaviour:
   aoeRadius: 1
   minRange: 1
   maxRange: 10
-  targetType: 1
+  requiresLineOfSight: 0
+  costAP: 1

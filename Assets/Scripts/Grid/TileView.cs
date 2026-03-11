@@ -17,6 +17,15 @@ public class TileView : MonoBehaviour
         }
     }
 
+    public int HeightLevel
+    {
+        get
+        {
+            if (tileData == null) return 0;
+            return tileData.heightLevel;
+        }
+    }
+
     public void Init(Vector2Int gridPos)
     {
         GridPos = gridPos;

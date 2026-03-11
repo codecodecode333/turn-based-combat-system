@@ -941,7 +941,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::TilemapPresenter
   grid: {fileID: 1195764739}
-  tilePrefab: {fileID: 0}
+  tilePrefab: {fileID: 3272374588090205614, guid: 84f7e424c535ffe4c8cde88b882eb1e9, type: 3}
 --- !u!4 &1078217250
 Transform:
   m_ObjectHideFlags: 0
@@ -987,10 +987,10 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::TileHighlighter
   grid: {fileID: 1195764739}
-  moveTilePrefab: {fileID: 0}
+  moveTilePrefab: {fileID: 6754760730953624394, guid: 345dbe42f9a5c2140891b081a293613d, type: 3}
   pathTilePrefab: {fileID: 8474163127165659146, guid: 426b427ace37d044eb540f229e0c8ad2, type: 3}
-  rangePrefab: {fileID: 0}
-  targetPrefab: {fileID: 0}
+  rangePrefab: {fileID: 4094983556775124581, guid: a1a24234cc2bb7643ab8fd78c75d7937, type: 3}
+  targetPrefab: {fileID: 9169441954277651116, guid: 3e5a3b31fd7a76645914ee3f8c36bc2e, type: 3}
   ghostTilePrefab: {fileID: 8474163127165659146, guid: 426b427ace37d044eb540f229e0c8ad2, type: 3}
   invalidTilePrefab: {fileID: 6754760730953624394, guid: 345dbe42f9a5c2140891b081a293613d, type: 3}
 --- !u!4 &1114685926
@@ -1990,6 +1990,10 @@ PrefabInstance:
       propertyPath: targetIndicator
       value: 
       objectReference: {fileID: 8601094974122874342}
+    - target: {fileID: 6912995081859625821, guid: 0402c8c641b24064b8202c3b1c47fa13, type: 3}
+      propertyPath: maxAP
+      value: 6
+      objectReference: {fileID: 0}
     - target: {fileID: 6912995081859625821, guid: 0402c8c641b24064b8202c3b1c47fa13, type: 3}
       propertyPath: moveRange
       value: 4

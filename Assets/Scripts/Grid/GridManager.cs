@@ -220,12 +220,13 @@ public class GridManager : MonoBehaviour
         // 아래는 "SetGridPosOnly"를 우선 호출 시도 (없으면 reflection 없이 안전하게 무시)
         u.SetGridPosOnly(p);
     }
-    public bool CanStandFor(Unit mover, Vector2Int p)
+    public bool CanStandFor(Unit mover, Vector2Int from, Vector2Int to)
     {
-        if (!InBounds(p)) return false;
-        if (!IsPassableTile(p)) return false;
+        if (!InBounds(to)) return false;
+        if (!IsPassableTile(to)) return false;
+        if (!CanClimb(mover, from, to)) return false;
         // 비어있으면 OK
-        if (!occ.TryGetValue(p, out var u) || u == null || u.IsDead) return true;
+        if (!occ.TryGetValue(to, out var u) || u == null || u.IsDead) return true;
 
         // 자기 자리면 OK (BFS 시작점 처리)
         return u == mover;
@@ -256,7 +257,7 @@ public class GridManager : MonoBehaviour
 
             foreach (var nb in GetNeighbors4(cur))
             {
-                if (!CanStandFor(mover, nb)) continue;
+                if (!CanStandFor(mover, cur, nb)) continue;
 
                 int nextCost = curCost + 1;
                 if (nextCost > moveRange) continue;
@@ -298,7 +299,7 @@ public class GridManager : MonoBehaviour
 
             foreach (var nb in GetNeighbors4(cur))
             {
-                if (!CanStandFor(mover, nb)) continue;
+                if (!CanStandFor(mover, cur, nb)) continue;
 
                 int nextCost = curCost + 1;
                 if (nextCost > moveRange) continue;
@@ -375,7 +376,7 @@ public class GridManager : MonoBehaviour
         foreach (var step in path)
         {
             // 동적 점유(다른 유닛이 들어온 경우 등) 대비: 스텝마다 검증
-            if (!CanStandFor(u, step)) yield break;
+            if (!CanStandFor(u, u.GridPos, step)) yield break;
             // 기존 MoveRoutine은 논리 이동 확정 + 보간 이동
             yield return StartCoroutine(MoveRoutine(u, step));
         }
@@ -462,6 +463,24 @@ public class GridManager : MonoBehaviour
         return tile.tileData.passable;
     }
 
+    public int GetTileHeight(Vector2Int pos)
+    {
+        var tile = GetTileView(pos);
+        if (tile == null || tile.tileData == null) return 0;
+        return tile.tileData.heightLevel;
+    }
+
+    public int GetHeightDelta(Vector2Int from, Vector2Int to)
+    {
+        return GetTileHeight(to) - GetTileHeight(from);
+    }
+
+    public bool CanClimb(Unit mover, Vector2Int from, Vector2Int to)
+    {
+        if (mover == null) return false;
+        int dh = Mathf.Abs(GetHeightDelta(from, to));
+        return dh <= mover.maxClimbDelta;
+    }
 
 #if UNITY_EDITOR
     void OnDrawGizmos()
