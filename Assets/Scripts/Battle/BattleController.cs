@@ -525,9 +525,9 @@ public class BattleController : MonoBehaviour
         foreach (var b in skillButtons)
             if (b != null) b.interactable = v;
     }
-
+    
     // =========================
-    // Target resolver
+    // Target resolver (Preview / Confirm 공용)
     // =========================
     List<Unit> ResolveTargets(
         SkillData skill,
@@ -538,24 +538,45 @@ public class BattleController : MonoBehaviour
         Unit clickedUnit = null
     )
     {
+        if (caster == null) return new List<Unit>();
+
         return ResolveTargetsFromPosition(
-            skill, caster, caster.GridPos, allies, enemies, clickedTile, clickedUnit);
+            skill,
+            caster,
+            caster.GridPos,
+            allies,
+            enemies,
+            clickedTile,
+            clickedUnit
+        );
     }
 
     List<Unit> ResolveTargetsFromPosition(
-    SkillData skill,
-    Unit caster,
-    Vector2Int casterPos,
-    List<Unit> allies,
-    List<Unit> enemies,
-    Vector2Int? clickedTile = null,
-    Unit clickedUnit = null
+        SkillData skill,
+        Unit caster,
+        Vector2Int casterPos,
+        List<Unit> allies,
+        List<Unit> enemies,
+        Vector2Int? clickedTile = null,
+        Unit clickedUnit = null
     )
     {
         var targets = new List<Unit>();
         if (skill == null || caster == null) return targets;
 
-        int Dist(Vector2Int a, Vector2Int b) => Mathf.Abs(a.x - b.x) + Mathf.Abs(a.y - b.y);
+        // null 방어
+        if (allies == null) allies = new List<Unit>();
+        if (enemies == null) enemies = new List<Unit>();
+
+        int Dist(Vector2Int a, Vector2Int b)
+        {
+            return Mathf.Abs(a.x - b.x) + Mathf.Abs(a.y - b.y);
+        }
+
+        bool IsAlive(Unit u)
+        {
+            return u != null && !u.IsDead;
+        }
 
         bool InCastRange(Vector2Int from, Vector2Int to)
         {
@@ -568,51 +589,73 @@ public class BattleController : MonoBehaviour
             if (!skill.requiresLineOfSight)
                 return true;
 
-            if (grid == null) return true;
+            if (!grid) grid = GridManager.I;
+            if (!grid)
+                return false;
 
             return grid.HasLineOfSight(from, to);
         }
 
-        bool CanAffectPoint(Vector2Int from, Vector2Int to)
+        bool CanCastPoint(Vector2Int from, Vector2Int to)
         {
             return InCastRange(from, to) && HasLOS(from, to);
         }
 
-        IEnumerable<Unit> Alive(IEnumerable<Unit> list)
+        IEnumerable<Unit> AliveUnits(IEnumerable<Unit> list)
         {
+            if (list == null) yield break;
+
             foreach (var u in list)
-                if (u != null && !u.IsDead)
+            {
+                if (IsAlive(u))
                     yield return u;
+            }
         }
 
-        Unit NearestInRange(IEnumerable<Unit> candidates)
+        void AddUnique(Unit u)
+        {
+            if (!IsAlive(u)) return;
+            if (!targets.Contains(u))
+                targets.Add(u);
+        }
+
+        Unit FindNearestValid(IEnumerable<Unit> list)
         {
             Unit best = null;
             int bestDist = int.MaxValue;
 
-            foreach (var u in Alive(candidates))
+            foreach (var u in AliveUnits(list))
             {
-                if (!CanAffectPoint(casterPos, u.GridPos))
+                if (!CanCastPoint(casterPos, u.GridPos))
                     continue;
 
                 int d = Dist(casterPos, u.GridPos);
-                if (d < skill.minRange || d > skill.maxRange) continue;
                 if (d < bestDist)
                 {
                     bestDist = d;
                     best = u;
                 }
             }
+
             return best;
         }
 
-        void AddAOEFromCenter(Vector2Int center, IEnumerable<Unit> candidates)
+        void AddUnitsInAOE(Vector2Int center)
         {
             int r = Mathf.Max(0, skill.aoeRadius);
-            foreach (var u in Alive(candidates))
+
+            // ClickTileAOE는 Friendly Fire ON:
+            // 범위 내 모든 유닛(아군 + 적군) 대상
+            foreach (var u in AliveUnits(allies))
             {
                 if (Dist(center, u.GridPos) <= r)
-                    targets.Add(u);
+                    AddUnique(u);
+            }
+
+            foreach (var u in AliveUnits(enemies))
+            {
+                if (Dist(center, u.GridPos) <= r)
+                    AddUnique(u);
             }
         }
 
@@ -620,84 +663,106 @@ public class BattleController : MonoBehaviour
         {
             case SkillTargetMode.AutoNearestSingle:
             {
-                var t = NearestInRange(enemies);
-                if (t != null) targets.Add(t);
+                var target = FindNearestValid(enemies);
+                if (target != null)
+                    AddUnique(target);
                 break;
             }
 
             case SkillTargetMode.ClickSingle:
             {
-                if (clickedUnit != null && !clickedUnit.IsDead)
+                // 확정 실행 / 클릭 확정 판정:
+                // 클릭된 유닛이 있어야 하고, 적 팀이며, 사거리+LOS 만족이어야 함
+                if (clickedUnit != null && IsAlive(clickedUnit))
                 {
-                    if (!allies.Contains(clickedUnit) &&
-                        CanAffectPoint(casterPos, clickedUnit.GridPos))
+                    if (enemies.Contains(clickedUnit) &&
+                        CanCastPoint(casterPos, clickedUnit.GridPos))
                     {
-                        targets.Add(clickedUnit);
+                        AddUnique(clickedUnit);
                     }
-                    break;
                 }
 
-                foreach (var e in Alive(enemies))
-                {
-                    if (CanAffectPoint(casterPos, e.GridPos))
-                        targets.Add(e);
-                }
                 break;
             }
 
             case SkillTargetMode.ClickTileAOE:
             {
-                if (!clickedTile.HasValue) break;
+                // 중심 타일이 사거리(+LOS) 만족해야만 유효
+                if (!clickedTile.HasValue)
+                    break;
 
-                var center = clickedTile.Value;
-                if (!CanAffectPoint(casterPos, center)) break;
+                Vector2Int center = clickedTile.Value;
+                if (!CanCastPoint(casterPos, center))
+                    break;
 
-                AddAOEFromCenter(center, enemies);
+                AddUnitsInAOE(center);
                 break;
             }
 
             case SkillTargetMode.AllEnemiesInRange:
             {
-                foreach (var e in Alive(enemies))
+                foreach (var e in AliveUnits(enemies))
                 {
-                    if (CanAffectPoint(casterPos, e.GridPos))
-                        targets.Add(e);
+                    if (CanCastPoint(casterPos, e.GridPos))
+                        AddUnique(e);
                 }
                 break;
             }
 
             case SkillTargetMode.AllEnemiesAnywhere:
             {
-                foreach (var e in Alive(enemies))
+                foreach (var e in AliveUnits(enemies))
                 {
                     if (HasLOS(casterPos, e.GridPos))
-                        targets.Add(e);
+                        AddUnique(e);
                 }
                 break;
             }
 
             case SkillTargetMode.AllAlliesInRange:
             {
-                foreach (var a in Alive(allies))
+                foreach (var a in AliveUnits(allies))
                 {
-                    if (CanAffectPoint(casterPos, a.GridPos))
-                        targets.Add(a);
+                    if (CanCastPoint(casterPos, a.GridPos))
+                        AddUnique(a);
                 }
                 break;
             }
 
             case SkillTargetMode.AllAlliesAnywhere:
             {
-                foreach (var a in Alive(allies))
+                foreach (var a in AliveUnits(allies))
                 {
                     if (HasLOS(casterPos, a.GridPos))
-                        targets.Add(a);
+                        AddUnique(a);
                 }
                 break;
             }
         }
 
         return targets;
+    }
+
+    bool HasLOSForSkill(SkillData skill, Vector2Int from, Vector2Int to)
+    {
+        if (skill == null) return false;
+        if (!skill.requiresLineOfSight) return true;
+
+        if (!grid) grid = GridManager.I;
+        if (!grid) return false;
+
+        return grid.HasLineOfSight(from, to);
+    }
+
+    bool IsPointCastable(SkillData skill, Vector2Int from, Vector2Int to)
+    {
+        if (skill == null) return false;
+
+        int d = Mathf.Abs(from.x - to.x) + Mathf.Abs(from.y - to.y);
+        if (d < skill.minRange || d > skill.maxRange)
+            return false;
+
+        return HasLOSForSkill(skill, from, to);
     }
 
     Unit ChooseFirstAlive(List<Unit> list)
@@ -1128,9 +1193,25 @@ public class BattleController : MonoBehaviour
             return;
         }
 
-        // aoeRadius (Manhattan) 기반 타겟 타일 계산
-        var tiles = BuildManhattanDisk(gridPos, Mathf.Max(0, selectedSkill.aoeRadius));
-        tileHighlighter.ShowTargetTiles(tiles);
+        var resolved = ResolveTargetsFromPosition(
+            PlannedSkill,
+            activeUnit,
+            PreviewPosition,
+            GetCasterAllies(activeUnit),
+            GetCasterEnemies(activeUnit),
+            gridPos,
+            null
+        );
+
+        var tiles = new HashSet<Vector2Int>();
+        for (int i = 0; i < resolved.Count; i++)
+        {
+            var u = resolved[i];
+            if (u != null && !u.IsDead)
+                tiles.Add(u.GridPos);
+        }
+
+        tileHighlighter.ShowTargetTiles(new List<Vector2Int>(tiles));
     }
 
     public void ClearHoverAOEPreview()
@@ -1538,28 +1619,6 @@ public class BattleController : MonoBehaviour
             default:
                 return true;
         }
-    }
-
-    bool HasLOSForSkill(SkillData skill, Vector2Int from, Vector2Int to)
-    {
-        if (skill == null) return false;
-        if (!skill.requiresLineOfSight) return true;
-
-        if (!grid) grid = GridManager.I;
-        if (!grid) return false;
-
-        return grid.HasLineOfSight(from, to);
-    }
-
-    bool IsPointCastable(SkillData skill, Vector2Int from, Vector2Int to)
-    {
-        if (skill == null) return false;
-
-        int d = Mathf.Abs(from.x - to.x) + Mathf.Abs(from.y - to.y);
-        if (d < skill.minRange || d > skill.maxRange)
-            return false;
-
-        return HasLOSForSkill(skill, from, to);
     }
 
     private void PlanMove(Vector2Int gridPos)
