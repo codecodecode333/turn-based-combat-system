@@ -5,11 +5,24 @@ using UnityEngine;
 
 /// <summary>
 /// Utility 기반 AI 플래너.
-/// - "이동 타일" + "스킬" + (필요 시) "clickedTile / clickedUnit"까지 포함한 실행 계획을 만든다.
-/// - BattleController.ResolveTargets()의 SkillTargetMode 규칙과 최대한 동일하게 맞춘다.
+/// 6차 목표 패치:
+/// - AP(cost) 반영
+/// - LOS 반영
+/// - Height 이동 가능성은 GridManager reachable 결과 재사용
+/// - FriendlyFirePenalty / HazardTilePenalty 반영
+/// - 원거리 유닛의 "공격 가능 + 안전 우선" 폴백 적용
+///
 /// </summary>
 public static class AIPlanner
 {
+    // ===== 임시 로컬 가중치 =====
+    // 지금은 AIProfile에 필드가 없으므로 내부 상수로 둔다.
+    // 6.5~7차에서 AIProfile로 승격 권장.
+    const float COST_PENALTY_PER_AP = 0.35f;
+    const float FRIENDLY_FIRE_MULTIPLIER = 1.15f;
+    const float HAZARD_TILE_PENALTY = 6.0f;
+    const float SELF_HAZARD_EXTRA_PENALTY = 2.5f;
+
     public struct ActionCandidate
     {
         public Vector2Int moveTile;
@@ -46,38 +59,62 @@ public static class AIPlanner
         if (actor == null || actor.IsDead || grid == null || profile == null || skillPool == null || skillPool.Length == 0)
             return default;
 
-        var band = GetDesiredRangeBand(skillPool, profile);
-        // 1) 이동 후보(도달 타일 + 비용)
+        var usableSkills = new List<SkillData>(skillPool.Length);
+        foreach (var skill in skillPool)
+        {
+            if (skill == null) continue;
+            if (!actor.CanPayAP(skill.costAP)) continue;
+            usableSkills.Add(skill);
+        }
+
+        var band = GetDesiredRangeBand(usableSkills.ToArray(), profile);
+
         var costs = grid.GetReachableCosts(actor, actor.moveRange);
-        var tiles = BuildTileCandidates(actor, actorEnemies, costs, profile, band, grid);
+        var tiles = BuildTileCandidates(actor, actorEnemies, usableSkills, costs, profile, band, grid);
 
-
-        // 2) 행동 후보 생성 + 점수화
         var candidates = new List<ActionCandidate>(128);
 
         foreach (var tile in tiles)
         {
-            foreach (var skill in skillPool)
+            foreach (var skill in usableSkills)
             {
-                if (skill == null) continue;
-                EvaluateSkillAtTile(actor, actorAllies, actorEnemies, tile, skill, grid, profile, opponentSkillPool, candidates);
+                EvaluateSkillAtTile(
+                    actor,
+                    actorAllies,
+                    actorEnemies,
+                    tile,
+                    skill,
+                    grid,
+                    profile,
+                    opponentSkillPool,
+                    usableSkills,
+                    candidates
+                );
             }
         }
 
-        // 공격 가능한 후보가 하나라도 있으면, 그 후보들만으로 선택
         var actionable = candidates.Where(c => c.targetCount > 0).ToList();
-        if (actionable.Count > 0) candidates = actionable;
+        if (actionable.Count > 0)
+            candidates = actionable;
 
-        // 3) 후보가 없으면 접근 이동(스킬은 null) 플랜 반환
         if (candidates.Count == 0)
         {
-            return BuildApproachFallback(actor, actorEnemies, costs, profile, opponentSkillPool, band);
+            return BuildApproachFallback(
+                actor,
+                actorAllies,
+                actorEnemies,
+                usableSkills,
+                costs,
+                grid,
+                profile,
+                opponentSkillPool,
+                band
+            );
         }
 
-        // 4) 선택(상위 K + 실수 확률)
         candidates.Sort((a, b) => b.score.CompareTo(a.score));
-        int k = Mathf.Clamp(profile.topK, 1, candidates.Count);
 
+        int k = Mathf.Clamp(profile.topK, 1, candidates.Count);
         if (UnityEngine.Random.value < profile.mistakeChance)
             return candidates[UnityEngine.Random.Range(0, k)];
 
@@ -88,13 +125,14 @@ public static class AIPlanner
     static List<Vector2Int> BuildTileCandidates(
         Unit actor,
         List<Unit> enemies,
+        List<SkillData> usableSkills,
         Dictionary<Vector2Int, int> costs,
         AIProfile profile,
         (int desiredMin, int desiredMax) band,
         GridManager grid = null
     )
     {
-        var scored = new List<(Vector2Int tile, int moveCost, int primary, int nearestDist)>(costs.Count);
+        var scored = new List<(Vector2Int tile, int moveCost, int primary, int nearestDist, bool hasHazard, bool canAttack)>(costs.Count);
 
         foreach (var kv in costs)
         {
@@ -105,14 +143,24 @@ public static class AIPlanner
 
             int moveCost = kv.Value;
             int nearest = NearestDistanceToAny(tile, enemies);
+            bool hasHazard = TileHasHazard(grid, tile);
+            bool canAttack = CanAnySkillHitFromTile(actor, tile, usableSkills, actorAllies: null, actorEnemies: enemies, grid);
 
             int primary;
-            if (band.desiredMin == 0 && band.desiredMax == 0)
+            if (canAttack)
+            {
+                primary = 0; // 6차: 공격 가능 타일 우선
+            }
+            else if (band.desiredMin == 0 && band.desiredMax == 0)
+            {
                 primary = nearest; // 근접: 가까워지기
+            }
             else
+            {
                 primary = DistanceOutsideBand(nearest, band.desiredMin, band.desiredMax); // 원거리: 밴드 유지
+            }
 
-            scored.Add((tile, moveCost, primary, nearest));
+            scored.Add((tile, moveCost, primary, nearest, hasHazard, canAttack));
         }
 
         scored.Sort((a, b) =>
@@ -120,13 +168,17 @@ public static class AIPlanner
             int c = a.primary.CompareTo(b.primary);
             if (c != 0) return c;
 
+            // 위험 타일 회피 우선
+            c = a.hasHazard.CompareTo(b.hasHazard);
+            if (c != 0) return c;
+
             c = a.moveCost.CompareTo(b.moveCost);
             if (c != 0) return c;
 
             if (band.desiredMin == 0 && band.desiredMax == 0)
-                return a.nearestDist.CompareTo(b.nearestDist); // 근접: 더 가까운
+                return a.nearestDist.CompareTo(b.nearestDist);
             else
-                return b.nearestDist.CompareTo(a.nearestDist); // 원거리: 너무 붙지 않게
+                return b.nearestDist.CompareTo(a.nearestDist);
         });
 
         int take = Mathf.Clamp(profile.maxTilesToEvaluate, 1, scored.Count);
@@ -140,8 +192,11 @@ public static class AIPlanner
 
     static ActionCandidate BuildApproachFallback(
         Unit actor,
+        List<Unit> allies,
         List<Unit> enemies,
-        Dictionary<Vector2Int, int> costs,   // ✅ tiles 대신 costs
+        List<SkillData> usableSkills,
+        Dictionary<Vector2Int, int> costs,
+        GridManager grid,
         AIProfile profile,
         SkillData[] opponentSkillPool,
         (int desiredMin, int desiredMax) band
@@ -160,27 +215,34 @@ public static class AIPlanner
             Vector2Int tile = kv.Key;
             int moveCost = kv.Value;
 
-            int d = NearestDistanceToAny(tile, enemies);
-            float threat = EstimateThreatCount(tile, enemies, opponentSkillPool);
+            int nearest = NearestDistanceToAny(tile, enemies);
+            float threat = EstimateThreatCount(tile, enemies, opponentSkillPool, grid);
+            float hazardPenalty = GetHazardPenalty(grid, tile);
+            bool canAttack = CanAnySkillHitFromTile(actor, tile, usableSkills, allies, enemies, grid);
 
             float score;
-            if (band.desiredMin == 0 && band.desiredMax == 0)
+            if (canAttack)
             {
-                // 근접 성향: 가까워지기
-                score = (-d * profile.weightApproach) - (threat * profile.weightThreat);
+                // 6차: 원거리 폴백 핵심
+                // "공격 가능 + 안전"이 밴드보다 우선
+                score = 8f - (threat * profile.weightThreat) - hazardPenalty;
+            }
+            else if (band.desiredMin == 0 && band.desiredMax == 0)
+            {
+                score = (-nearest * profile.weightApproach)
+                      - (threat * profile.weightThreat)
+                      - hazardPenalty;
             }
             else
             {
-                // 원거리 성향: 거리 밴드 유지
-                int outDist = DistanceOutsideBand(d, band.desiredMin, band.desiredMax);
-                score = (-outDist * profile.weightKeepRange) - (threat * profile.weightThreat);
+                int outDist = DistanceOutsideBand(nearest, band.desiredMin, band.desiredMax);
+                score = (-outDist * profile.weightKeepRange)
+                      - (threat * profile.weightThreat)
+                      - hazardPenalty;
             }
 
-            // ✅ "막혔을 때 아무 것도 안 함" 방지용 타이브레이커
-            // - 동점이면 제자리(0) 대신 한 칸이라도 움직이게 유도(아주 작은 값)
+            // 너무 정지하지 않게 아주 작은 타이브레이커
             score += moveCost * 0.001f;
-
-            // ✅ 그래도 제자리 고정이 심하면 제자리에 아주 미세한 페널티
             if (tile == actor.GridPos) score -= 0.0005f;
 
             if (score > best.score)
@@ -192,7 +254,8 @@ public static class AIPlanner
 
         return best;
     }
-    // ===== Evaluate Skills at Tile (SkillTargetMode) =====
+
+    // ===== Evaluate Skills at Tile =====
     static void EvaluateSkillAtTile(
         Unit actor,
         List<Unit> allies,
@@ -202,51 +265,81 @@ public static class AIPlanner
         GridManager grid,
         AIProfile profile,
         SkillData[] opponentSkillPool,
+        List<SkillData> ownUsableSkills,
         List<ActionCandidate> outList
     )
     {
-        // 공통 리스크(이 타일에 섰을 때 맞을 확률)
-        float threat = EstimateThreatCount(fromTile, enemies, opponentSkillPool);
+        if (actor == null || skill == null || grid == null) return;
+        if (!actor.CanPayAP(skill.costAP)) return;
+
+        float threat = EstimateThreatCount(fromTile, enemies, opponentSkillPool, grid);
         float risk = threat * profile.weightThreat;
+        float hazardPenalty = GetHazardPenalty(grid, fromTile);
+        float apPenalty = skill.costAP * COST_PENALTY_PER_AP;
 
         switch (skill.targetMode)
         {
             case SkillTargetMode.AutoNearestSingle:
             {
-                var t = ChooseNearestInRangeFromPos(fromTile, enemies, skill.minRange, skill.maxRange);
-                if (t == null) break;
+                var clickedUnit = ChooseNearestValidEnemy(enemies, fromTile, skill, grid);
+                if (clickedUnit == null) break;
 
-                float value = ScoreSingleTargetValue(actor, fromTile, skill, t, profile);
+                var targets = CombatTargetResolver.ResolveTargetsFromPosition(
+                    skill,
+                    actor,
+                    fromTile,
+                    allies,
+                    enemies,
+                    grid,
+                    null,
+                    clickedUnit
+                );
+                if (targets.Count <= 0) break;
+
+                float value = ScoreResolvedTargetsValue(actor, fromTile, skill, allies, enemies, targets, profile);
                 outList.Add(new ActionCandidate
                 {
                     moveTile = fromTile,
                     skill = skill,
-                    clickedUnit = null,     // 클릭 없음
+                    clickedUnit = null,
                     clickedTile = null,
-                    targetCount = 1,
-                    score = value - risk
+                    targetCount = CountEnemyTargets(targets, enemies),
+                    score = value - risk - hazardPenalty - apPenalty
                 });
                 break;
             }
 
             case SkillTargetMode.ClickSingle:
             {
-                // AI는 "클릭"을 만들어야 하므로, 사거리 내 적 중 best 1개를 고른다.
                 Unit bestT = null;
                 float bestScore = float.NegativeInfinity;
+                int bestCount = 0;
 
                 foreach (var t in enemies)
                 {
                     if (!IsAlive(t)) continue;
-                    int d = Manhattan(fromTile, t.GridPos);
-                    if (d < skill.minRange || d > skill.maxRange) continue;
 
-                    float v = ScoreSingleTargetValue(actor, fromTile, skill, t, profile);
-                    float s = v - risk;
-                    if (s > bestScore)
+                    var targets = CombatTargetResolver.ResolveTargetsFromPosition(
+                        skill,
+                        actor,
+                        fromTile,
+                        allies,
+                        enemies,
+                        grid,
+                        null,
+                        t
+                    );
+                    if (targets.Count <= 0) continue;
+
+                    float value = ScoreResolvedTargetsValue(actor, fromTile, skill, allies, enemies, targets, profile);
+                    int count = CountEnemyTargets(targets, enemies);
+                    float score = value - risk - hazardPenalty - apPenalty;
+
+                    if (score > bestScore)
                     {
-                        bestScore = s;
+                        bestScore = score;
                         bestT = t;
+                        bestCount = count;
                     }
                 }
 
@@ -256,9 +349,9 @@ public static class AIPlanner
                     {
                         moveTile = fromTile,
                         skill = skill,
-                        clickedUnit = bestT, // ✅ RunSkill(..., clickedUnit)로 넘겨야 함
+                        clickedUnit = bestT,
                         clickedTile = null,
-                        targetCount = 1,
+                        targetCount = bestCount,
                         score = bestScore
                     });
                 }
@@ -267,29 +360,40 @@ public static class AIPlanner
 
             case SkillTargetMode.ClickTileAOE:
             {
-                // AI는 "중심 타일 클릭"을 만들어야 하므로, 가능한 center 후보를 만들고 최고점을 선택한다.
                 if (enemies == null || enemies.Count == 0) break;
 
                 var centers = BuildAOECenterCandidates(fromTile, enemies, skill, grid);
 
                 Vector2Int? bestCenter = null;
-                float best = float.NegativeInfinity;
+                float bestScore = float.NegativeInfinity;
                 int bestCount = 0;
 
-                foreach (var c in centers)
+                foreach (var center in centers)
                 {
-                    if (!InCastRange(fromTile, c, skill)) continue;
+                    var targets = CombatTargetResolver.ResolveTargetsFromPosition(
+                        skill,
+                        actor,
+                        fromTile,
+                        allies,
+                        enemies,
+                        grid,
+                        center,
+                        null
+                    );
+                    
+                    if (targets.Count <= 0) continue;
 
-                    int count;
-                    float v = ScoreAOEValue(actor, fromTile, skill, c, enemies, profile, out count);
-                    if (count <= 0) continue;
+                    int enemyCount = CountEnemyTargets(targets, enemies);
+                    if (enemyCount <= 0) continue;
 
-                    float s = v - risk;
-                    if (s > best)
+                    float value = ScoreResolvedTargetsValue(actor, fromTile, skill, allies, enemies, targets, profile);
+                    float score = value - risk - hazardPenalty - apPenalty;
+
+                    if (score > bestScore)
                     {
-                        best = s;
-                        bestCenter = c;
-                        bestCount = count;
+                        bestScore = score;
+                        bestCenter = center;
+                        bestCount = enemyCount;
                     }
                 }
 
@@ -299,75 +403,33 @@ public static class AIPlanner
                     {
                         moveTile = fromTile,
                         skill = skill,
-                        clickedTile = bestCenter, // ✅ RunSkill(..., clickedTile)로 넘겨야 함
+                        clickedTile = bestCenter,
                         clickedUnit = null,
                         targetCount = bestCount,
-                        score = best
+                        score = bestScore
                     });
                 }
-
                 break;
             }
 
             case SkillTargetMode.AllEnemiesInRange:
-            {
-                int count;
-                float v = ScoreMultiTargetsValue(actor, fromTile, skill, enemies, inRangeOnly: true, profile, out count);
-                if (count <= 0) break;
-
-                outList.Add(new ActionCandidate
-                {
-                    moveTile = fromTile,
-                    skill = skill,
-                    clickedTile = null,
-                    clickedUnit = null,
-                    targetCount = count,
-                    score = v - risk
-                });
-                break;
-            }
-
             case SkillTargetMode.AllEnemiesAnywhere:
-            {
-                int count;
-                float v = ScoreMultiTargetsValue(actor, fromTile, skill, enemies, inRangeOnly: false, profile, out count);
-                if (count <= 0) break;
-
-                outList.Add(new ActionCandidate
-                {
-                    moveTile = fromTile,
-                    skill = skill,
-                    clickedTile = null,
-                    clickedUnit = null,
-                    targetCount = count,
-                    score = v - risk
-                });
-                break;
-            }
-
             case SkillTargetMode.AllAlliesInRange:
-            {
-                int count;
-                float v = ScoreMultiTargetsValue(actor, fromTile, skill, allies, inRangeOnly: true, profile, out count);
-                if (count <= 0) break;
-
-                outList.Add(new ActionCandidate
-                {
-                    moveTile = fromTile,
-                    skill = skill,
-                    clickedTile = null,
-                    clickedUnit = null,
-                    targetCount = count,
-                    score = v - risk
-                });
-                break;
-            }
-
             case SkillTargetMode.AllAlliesAnywhere:
             {
-                int count;
-                float v = ScoreMultiTargetsValue(actor, fromTile, skill, allies, inRangeOnly: false, profile, out count);
-                if (count <= 0) break;
+                var targets = CombatTargetResolver.ResolveTargetsFromPosition(
+                    skill,
+                    actor,
+                    fromTile,
+                    allies,
+                    enemies,
+                    grid,
+                    null,
+                    null
+                );
+                if (targets.Count <= 0) break;
+
+                float value = ScoreResolvedTargetsValue(actor, fromTile, skill, allies, enemies, targets, profile);
 
                 outList.Add(new ActionCandidate
                 {
@@ -375,8 +437,8 @@ public static class AIPlanner
                     skill = skill,
                     clickedTile = null,
                     clickedUnit = null,
-                    targetCount = count,
-                    score = v - risk
+                    targetCount = CountEnemyTargets(targets, enemies),
+                    score = value - risk - hazardPenalty - apPenalty
                 });
                 break;
             }
@@ -385,11 +447,44 @@ public static class AIPlanner
 
     // ===== Scoring =====
 
+    static float ScoreResolvedTargetsValue(
+        Unit actor,
+        Vector2Int fromTile,
+        SkillData skill,
+        List<Unit> allies,
+        List<Unit> enemies,
+        List<Unit> targets,
+        AIProfile profile
+    )
+    {
+        if (targets == null || targets.Count == 0) return 0f;
+
+        float sum = 0f;
+
+        foreach (var t in targets)
+        {
+            if (!IsAlive(t)) continue;
+
+            float v = ScoreSingleTargetValue(actor, fromTile, skill, t, profile);
+
+            if (enemies != null && enemies.Contains(t))
+            {
+                sum += v;
+            }
+            else if (allies != null && allies.Contains(t))
+            {
+                // Friendly Fire / 아군 오타겟은 강한 감점
+                sum -= v * FRIENDLY_FIRE_MULTIPLIER;
+            }
+        }
+
+        return sum;
+    }
+
     static float ScoreSingleTargetValue(Unit actor, Vector2Int fromTile, SkillData skill, Unit target, AIProfile profile)
     {
         float value = EstimateSkillValue(skill, target, profile);
 
-        // 타겟 선호(HP 낮은 타겟, 가까운 타겟)
         if (target != null && !target.IsDead)
         {
             float hp01 = target.maxHP <= 0 ? 1f : (target.currentHP / (float)target.maxHP);
@@ -402,67 +497,6 @@ public static class AIPlanner
         return value;
     }
 
-    static float ScoreAOEValue(
-        Unit actor,
-        Vector2Int fromTile,
-        SkillData skill,
-        Vector2Int center,
-        List<Unit> enemies,
-        AIProfile profile,
-        out int hitCount
-    )
-    {
-        hitCount = 0;
-        if (enemies == null) return 0f;
-
-        int r = Mathf.Max(0, skill.aoeRadius);
-        float sum = 0f;
-
-        foreach (var u in enemies)
-        {
-            if (!IsAlive(u)) continue;
-            if (Manhattan(center, u.GridPos) > r) continue;
-
-            hitCount++;
-            sum += ScoreSingleTargetValue(actor, fromTile, skill, u, profile);
-        }
-
-        return sum;
-    }
-
-    static float ScoreMultiTargetsValue(
-        Unit actor,
-        Vector2Int fromTile,
-        SkillData skill,
-        List<Unit> list,
-        bool inRangeOnly,
-        AIProfile profile,
-        out int count
-    )
-    {
-        count = 0;
-        if (list == null) return 0f;
-
-        float sum = 0f;
-
-        foreach (var u in list)
-        {
-            if (!IsAlive(u)) continue;
-
-            if (inRangeOnly)
-            {
-                int d = Manhattan(fromTile, u.GridPos);
-                if (d < skill.minRange || d > skill.maxRange) continue;
-            }
-
-            count++;
-            sum += ScoreSingleTargetValue(actor, fromTile, skill, u, profile);
-        }
-
-        return sum;
-    }
-
-    // 스킬의 “대략적 기대값”(현재 프로젝트 이펙트 기준)
     static float EstimateSkillValue(SkillData skill, Unit target, AIProfile profile)
     {
         float dmg = 0f;
@@ -512,8 +546,9 @@ public static class AIPlanner
         return value;
     }
 
-    // 위협도(간단): "상대 유닛 중, 내 타일을 사거리 안에 넣을 수 있는 수"
-    static float EstimateThreatCount(Vector2Int myTile, List<Unit> opponents, SkillData[] opponentSkillPool)
+    // ===== Threat / Hazard =====
+
+    static float EstimateThreatCount(Vector2Int myTile, List<Unit> opponents, SkillData[] opponentSkillPool, GridManager grid)
     {
         int count = 0;
 
@@ -528,13 +563,10 @@ public static class AIPlanner
                 foreach (var s in opponentSkillPool)
                 {
                     if (s == null) continue;
+                    if (!CombatTargetResolver.IsPointCastable(s, op.GridPos, myTile, grid)) continue;
 
-                    int d = Manhattan(op.GridPos, myTile);
-                    if (d >= s.minRange && d <= s.maxRange)
-                    {
-                        threatens = true;
-                        break;
-                    }
+                    threatens = true;
+                    break;
                 }
             }
             else
@@ -549,10 +581,27 @@ public static class AIPlanner
         return count;
     }
 
+    static float GetHazardPenalty(GridManager grid, Vector2Int tile)
+    {
+        if (grid == null) return 0f;
+
+        var tv = grid.GetTileView(tile);
+        if (tv == null || tv.tileData == null) return 0f;
+
+        if (string.IsNullOrEmpty(tv.tileData.hazardType))
+            return 0f;
+
+        return HAZARD_TILE_PENALTY;
+    }
+
+    static bool TileHasHazard(GridManager grid, Vector2Int tile)
+    {
+        return GetHazardPenalty(grid, tile) > 0f;
+    }
+
     // ===== AOE center candidates =====
     static List<Vector2Int> BuildAOECenterCandidates(Vector2Int fromTile, List<Unit> enemies, SkillData skill, GridManager grid)
     {
-        // 전수조사 대신: "적 타일" + "적 주변(aoeRadius)"를 중심 후보로 구성
         int r = Mathf.Max(0, skill.aoeRadius);
 
         var set = new HashSet<Vector2Int>();
@@ -573,44 +622,182 @@ public static class AIPlanner
             }
         }
 
-        // bounds + 대략 사거리 필터
         var list = new List<Vector2Int>(set.Count);
         foreach (var p in set)
         {
             if (grid != null && !grid.InBounds(p)) continue;
-            if (!InCastRange(fromTile, p, skill)) continue;
+            if (!CombatTargetResolver.IsPointCastable(skill, fromTile, p, grid)) continue;
             list.Add(p);
         }
 
-        // 성능 상한
         list.Sort((a, b) => Manhattan(fromTile, a).CompareTo(Manhattan(fromTile, b)));
+
         const int HARD_LIMIT = 60;
-        if (list.Count > HARD_LIMIT) list = list.Take(HARD_LIMIT).ToList();
+        if (list.Count > HARD_LIMIT)
+            list = list.Take(HARD_LIMIT).ToList();
 
         return list;
     }
 
     // ===== Helpers =====
+
     static bool IsAlive(Unit u) => u != null && !u.IsDead;
 
-    static bool InCastRange(Vector2Int from, Vector2Int to, SkillData skill)
+    static int CountEnemyTargets(List<Unit> targets, List<Unit> enemies)
     {
-        int d = Manhattan(from, to);
-        return d >= skill.minRange && d <= skill.maxRange;
+        int count = 0;
+        if (targets == null || enemies == null) return 0;
+
+        foreach (var t in targets)
+        {
+            if (t != null && enemies.Contains(t))
+                count++;
+        }
+
+        return count;
     }
 
-    static Unit ChooseNearestInRangeFromPos(Vector2Int fromPos, List<Unit> candidates, int minR, int maxR)
+    static bool CanAnySkillHitFromTile(
+        Unit actor,
+        Vector2Int fromTile,
+        List<SkillData> skills,
+        List<Unit> actorAllies,
+        List<Unit> actorEnemies,
+        GridManager grid
+    )
+    {
+        if (skills == null || skills.Count == 0) return false;
+        if (actor == null || actorEnemies == null || grid == null) return false;
+
+        foreach (var skill in skills)
+        {
+            if (skill == null) continue;
+            if (!actor.CanPayAP(skill.costAP)) continue;
+
+            switch (skill.targetMode)
+            {
+                case SkillTargetMode.AutoNearestSingle:
+                {
+                    var t = ChooseNearestValidEnemy(actorEnemies, fromTile, skill, grid);
+                    if (t != null) return true;
+                    break;
+                }
+
+                case SkillTargetMode.ClickSingle:
+                {
+                    foreach (var e in actorEnemies)
+                    {
+                        if (!IsAlive(e)) continue;
+                        var targets = CombatTargetResolver.ResolveTargetsFromPosition(
+                            skill,
+                            actor,
+                            fromTile,
+                            actorAllies,
+                            actorEnemies,
+                            grid,
+                            null,
+                            e
+                        );
+                        if (CountEnemyTargets(targets, actorEnemies) > 0)
+                            return true;
+                    }
+                    break;
+                }
+
+                case SkillTargetMode.ClickTileAOE:
+                {
+                    var centers = BuildAOECenterCandidates(fromTile, actorEnemies, skill, grid);
+                    foreach (var c in centers)
+                    {
+                        var targets = CombatTargetResolver.ResolveTargetsFromPosition(
+                            skill,
+                            actor,
+                            fromTile,
+                            actorAllies,
+                            actorEnemies,
+                            grid,
+                            c,
+                            null
+                        );
+                        if (CountEnemyTargets(targets, actorEnemies) > 0)
+                            return true;
+                    }
+                    break;
+                }
+
+                default:
+                {
+                    var targets = CombatTargetResolver.ResolveTargetsFromPosition(
+                            skill,
+                            actor,
+                            fromTile,
+                            actorAllies,
+                            actorEnemies,
+                            grid,
+                            null,
+                            null
+                        );
+                    if (CountEnemyTargets(targets, actorEnemies) > 0)
+                        return true;
+                    break;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    static Unit ChooseBestClickSingleTarget(
+        Unit actor,
+        List<Unit> allies,
+        List<Unit> enemies,
+        Vector2Int fromTile,
+        SkillData skill,
+        GridManager grid,
+        AIProfile profile
+    )
+    {
+        Unit best = null;
+        float bestScore = float.NegativeInfinity;
+
+        foreach (var t in enemies)
+        {
+            if (!IsAlive(t)) continue;
+
+            var targets = CombatTargetResolver.ResolveTargetsFromPosition(
+                skill,
+                actor,
+                fromTile,
+                allies,
+                enemies,
+                grid,
+                null,
+                t
+            );
+            if (targets.Count <= 0) continue;
+
+            float score = ScoreResolvedTargetsValue(actor, fromTile, skill, allies, enemies, targets, profile);
+            if (score > bestScore)
+            {
+                bestScore = score;
+                best = t;
+            }
+        }
+
+        return best;
+    }
+
+    static Unit ChooseNearestValidEnemy(List<Unit> enemies, Vector2Int fromPos, SkillData skill, GridManager grid)
     {
         Unit best = null;
         int bestDist = int.MaxValue;
 
-        foreach (var u in candidates)
+        foreach (var u in enemies)
         {
             if (!IsAlive(u)) continue;
+            if (!CombatTargetResolver.IsPointCastable(skill, fromPos, u.GridPos, grid)) continue;
 
             int d = Manhattan(fromPos, u.GridPos);
-            if (d < minR || d > maxR) continue;
-
             if (d < bestDist)
             {
                 bestDist = d;
@@ -620,8 +807,9 @@ public static class AIPlanner
 
         return best;
     }
-
-    static int Manhattan(Vector2Int a, Vector2Int b) => Mathf.Abs(a.x - b.x) + Mathf.Abs(a.y - b.y);
+    
+    static int Manhattan(Vector2Int a, Vector2Int b)
+        => Mathf.Abs(a.x - b.x) + Mathf.Abs(a.y - b.y);
 
     static int NearestDistanceToAny(Vector2Int from, List<Unit> candidates)
     {
@@ -643,7 +831,7 @@ public static class AIPlanner
         foreach (var s in skills)
         {
             if (s == null) continue;
-            if (s.maxRange <= 1) continue; // 근접 제외
+            if (s.maxRange <= 1) continue;
 
             if (s.maxRange > bestMax)
             {
@@ -653,11 +841,11 @@ public static class AIPlanner
         }
 
         if (bestMax < 0)
-            return (0, 0); // 원거리 없음 → 기존 접근 정책
+            return (0, 0);
 
         int buffer = Mathf.Max(0, profile.keepRangeBuffer);
         int desiredMax = Mathf.Max(1, bestMax - buffer);
-        int desiredMin = Mathf.Max(bestMin, 2); // 2칸 이내는 피하려는 기본값
+        int desiredMin = Mathf.Max(bestMin, 2);
 
         if (desiredMin > desiredMax)
             desiredMin = desiredMax;
