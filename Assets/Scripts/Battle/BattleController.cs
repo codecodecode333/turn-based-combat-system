@@ -165,6 +165,8 @@ public class BattleController : MonoBehaviour
     {
         if (skillButtons == null) return;
 
+        var pool = GetSkillPoolFor(activeUnit);
+
         for (int i = 0; i < skillButtons.Length; i++)
         {
             int idx = i;
@@ -173,13 +175,14 @@ public class BattleController : MonoBehaviour
             skillButtons[i].onClick.RemoveAllListeners();
             skillButtons[i].onClick.AddListener(() => UseSkill(idx));
 
-            // 버튼 텍스트 자동 세팅(선택)
             var label = skillButtons[i].GetComponentInChildren<TMP_Text>();
             if (label != null)
             {
-                var s = (playerSkills != null && idx < playerSkills.Length) ? playerSkills[idx] : null;
+                var s = (pool != null && idx < pool.Length) ? pool[idx] : null;
                 label.text = s != null ? s.skillName : "-";
             }
+
+            skillButtons[i].interactable = (pool != null && idx < pool.Length && pool[idx] != null);
         }
     }
 
@@ -319,16 +322,18 @@ public class BattleController : MonoBehaviour
 
         if (IsAlly(activeUnit))
         {
-            // 플레이어 입력 턴
             waitingInput = true;
             hasMovedThisTurn = false;
             ClearAllPlannedActions();
+
+            SetupSkillButtons();
             SetSkillButtonsInteractable(true);
+
             var data = grid.GetReachableData(activeUnit, activeUnit.moveRange);
             reachableMoveCache = data.cost;
             reachableMoveCameFromCache = data.cameFrom;
             inputMode = PlayerInputMode.Move;
-            // ✅ 입력 대기 상태에서만 표시
+
             if (tileHighlighter) tileHighlighter.ShowMoveTiles(reachableMoveCache.Keys);
         }
         else
@@ -388,18 +393,17 @@ public class BattleController : MonoBehaviour
     {
         if (battleEnded) return;
         if (!waitingInput || busy) return;
+        if (activeUnit == null || activeUnit.IsDead) return;
 
-        if (playerSkills == null) return;
-        if (skillIndex < 0 || skillIndex >= playerSkills.Length) return;
+        var pool = GetSkillPoolFor(activeUnit);
+        if (pool == null) return;
+        if (skillIndex < 0 || skillIndex >= pool.Length) return;
 
-        SkillData skill = playerSkills[skillIndex];
+        SkillData skill = pool[skillIndex];
         if (skill == null) return;
 
-        if (activeUnit == null) return;
         if (!activeUnit.CanPayAP(skill.costAP))
-        {
             return;
-        }
 
         if (PlannedSkill == skill && PlannedSkillIndex == skillIndex)
         {
