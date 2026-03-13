@@ -1,9 +1,9 @@
 using UnityEngine;
 
-public sealed class BurnStatus : StatusEffect
+public sealed class PoisonStatus : StatusEffect
 {
-    public BurnStatus(int damagePerTurn, int duration, Unit source)
-        : base(StatusId.Burn, damagePerTurn, duration, source)
+    public PoisonStatus(int damagePerTurn, int duration, Unit source)
+        : base(StatusId.Poison, damagePerTurn, duration, source)
     {
     }
 

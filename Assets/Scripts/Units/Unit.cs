@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 
 public class Unit : MonoBehaviour
@@ -58,6 +59,10 @@ public class Unit : MonoBehaviour
 
     private readonly System.Collections.Generic.List<StatusEffect> statusEffects
     = new System.Collections.Generic.List<StatusEffect>();
+    public IReadOnlyList<StatusEffect> StatusEffects => statusEffects;
+
+    private int statusRevision = 0;
+    public int StatusRevision => statusRevision;
 
     public Vector2Int GridPos { get; private set; }
     public bool isAlly;
@@ -133,12 +138,29 @@ public class Unit : MonoBehaviour
     // 공격자 위치를 받으면 넉백 방향 계산 가능
     public void TakeDamage(int dmg, Vector3 attackerWorldPos)
     {
-        currentHP -= dmg;
+        if (IsDead) return;
+        if (dmg <= 0) return;
+
+        // 1) Invincible: 모든 피해 무효
+        if (HasInvincible())
+        {
+            // 필요하면 여기서 무효화 이펙트/로그 추가 가능
+            return;
+        }
+
+        // 2) Shield: 먼저 피해 흡수
+        int finalDamage = TryAbsorbWithShield(dmg);
+
+        // Shield가 전부 막았으면 피격 애니메이션도 생략 가능
+        if (finalDamage <= 0)
+            return;
+
+        // 3) 남은 피해만 HP에 반영
+        currentHP -= finalDamage;
         if (currentHP < 0) currentHP = 0;
 
         PlayHit();
 
-        // ❌ StopAllCoroutines() 지우기
         if (hitCo != null) StopCoroutine(hitCo);
         hitCo = StartCoroutine(HitFeedback(attackerWorldPos));
 
@@ -182,7 +204,42 @@ public class Unit : MonoBehaviour
         hitCo = null;
     }
 
+    public bool HasInvincible()
+    {
+        for (int i = 0; i < statusEffects.Count; i++)
+        {
+            var s = statusEffects[i];
+            if (s == null || s.IsExpired) continue;
+            if (s.IsInvincible) return true;
+        }
+        return false;
+    }
 
+    public ShieldStatus GetShieldStatus()
+    {
+        for (int i = 0; i < statusEffects.Count; i++)
+        {
+            if (statusEffects[i] is ShieldStatus shield && !shield.IsExpired)
+                return shield;
+        }
+        return null;
+    }
+
+    public int TryAbsorbWithShield(int incomingDamage)
+    {
+        if (incomingDamage <= 0) return 0;
+
+        var shield = GetShieldStatus();
+        if (shield == null) return incomingDamage;
+
+        int remain = shield.Absorb(incomingDamage);
+
+        // shield가 0 이하가 되면 즉시 제거
+        if (shield.ShieldAmount <= 0)
+            statusEffects.Remove(shield);
+
+        return remain;
+    }
     public void Heal(int amount)
     {
         if (IsDead) return;
@@ -221,61 +278,109 @@ public class Unit : MonoBehaviour
 
         RestoreAPOnTurnStart();
 
-        // 뒤에서 앞으로 순회(제거 안전)
+        bool changed = false;
+
         for (int i = statusEffects.Count - 1; i >= 0; i--)
         {
             var s = statusEffects[i];
-            if (s == null) { statusEffects.RemoveAt(i); continue; }
+            if (s == null)
+            {
+                statusEffects.RemoveAt(i);
+                changed = true;
+                continue;
+            }
 
             s.OnTurnStart(this);
 
             if (s.IsExpired)
+            {
+                s.OnRemove(this);
                 statusEffects.RemoveAt(i);
+                changed = true;
+            }
         }
+
+        if (changed)
+            statusRevision++;
     }
 
     public void OnTurnEnd()
     {
         if (IsDead) return;
 
+        bool changed = false;
+
         for (int i = statusEffects.Count - 1; i >= 0; i--)
         {
             var s = statusEffects[i];
-            if (s == null) { statusEffects.RemoveAt(i); continue; }
+            if (s == null)
+            {
+                statusEffects.RemoveAt(i);
+                changed = true;
+                continue;
+            }
 
             s.OnTurnEnd(this);
 
             if (s.IsExpired)
+            {
+                s.OnRemove(this);
                 statusEffects.RemoveAt(i);
+                changed = true;
+            }
         }
+
+        if (changed)
+            statusRevision++;
     }
     public void AddOrRefreshStatus(StatusEffect incoming)
     {
         if (incoming == null || IsDead) return;
 
-        // 같은 Id면 갱신(여기서는 Burn에 최적화된 간단 룰)
         for (int i = 0; i < statusEffects.Count; i++)
         {
-            if (statusEffects[i] != null && statusEffects[i].Id == incoming.Id)
+            var cur = statusEffects[i];
+            if (cur == null)
             {
-                // Burn 갱신 규칙: 턴은 더 큰 값, 데미지는 더 큰 값
-                if (statusEffects[i] is BurnStatus cur && incoming is BurnStatus inc)
-                {
-                    cur.remainingTurns = System.Math.Max(cur.remainingTurns, inc.remainingTurns);
-                    cur.damagePerTurn = System.Math.Max(cur.damagePerTurn, inc.damagePerTurn);
-                }
-                else
-                {
-                    // 다른 상태 일반 갱신(턴만)
-                    statusEffects[i].remainingTurns = System.Math.Max(statusEffects[i].remainingTurns, incoming.remainingTurns);
-                }
-                return;
+                statusEffects.RemoveAt(i);
+                i--;
+                statusRevision++;
+                continue;
             }
+
+            if (cur.Id != incoming.Id)
+                continue;
+
+            cur.MergeFrom(incoming);
+            statusRevision++;
+            return;
         }
 
         statusEffects.Add(incoming);
+        incoming.OnApply(this);
+        statusRevision++;
     }
 
+    public T GetStatus<T>() where T : StatusEffect
+    {
+        for (int i = 0; i < statusEffects.Count; i++)
+        {
+            if (statusEffects[i] is T t && !t.IsExpired)
+                return t;
+        }
+        return null;
+    }
+
+    public StatusEffect GetStatus(StatusId id)
+    {
+        for (int i = 0; i < statusEffects.Count; i++)
+        {
+            var s = statusEffects[i];
+            if (s != null && s.Id == id && !s.IsExpired)
+                return s;
+        }
+        return null;
+    }
     public void SetGridPosAndWarp(Vector2Int p, GridManager grid)
     {
         GridPos = p;
@@ -320,5 +425,91 @@ public class Unit : MonoBehaviour
         if (currentAP < amount) return false;
         currentAP -= amount;
         return true;
+    }
+
+    public bool HasStatus(StatusId id)
+    {
+        for (int i = 0; i < statusEffects.Count; i++)
+        {
+            var s = statusEffects[i];
+            if (s != null && s.Id == id && !s.IsExpired)
+                return true;
+        }
+        return false;
+    }
+
+    public bool CanAct()
+    {
+        if (IsDead) return false;
+
+        for (int i = 0; i < statusEffects.Count; i++)
+        {
+            var s = statusEffects[i];
+            if (s != null && !s.IsExpired && s.BlocksAction)
+                return false;
+        }
+
+        return true;
+    }
+
+    public bool CanMove()
+    {
+        if (IsDead) return false;
+
+        for (int i = 0; i < statusEffects.Count; i++)
+        {
+            var s = statusEffects[i];
+            if (s != null && !s.IsExpired && s.BlocksMove)
+                return false;
+        }
+
+        return true;
+    }
+
+    public int GetEffectiveMoveRange()
+    {
+        int value = moveRange;
+
+        for (int i = 0; i < statusEffects.Count; i++)
+        {
+            var s = statusEffects[i];
+            if (s != null && !s.IsExpired)
+                value += s.MoveRangeDelta;
+        }
+
+        if (!CanMove())
+            return 0;
+
+        return Mathf.Max(0, value);
+    }
+
+    public bool HasCounterReady()
+    {
+        for (int i = 0; i < statusEffects.Count; i++)
+        {
+            var s = statusEffects[i];
+            if (s == null || s.IsExpired) continue;
+            if (s.HasCounter) return true;
+        }
+        return false;
+    }
+
+    public void RemoveStatus(StatusId id)
+    {
+        for (int i = statusEffects.Count - 1; i >= 0; i--)
+        {
+            var s = statusEffects[i];
+            if (s == null)
+            {
+                statusEffects.RemoveAt(i);
+                continue;
+            }
+
+            if (s.Id == id)
+            {
+                s.OnRemove(this);
+                statusEffects.RemoveAt(i);
+            }
+        }
     }
 }

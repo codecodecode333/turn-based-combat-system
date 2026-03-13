@@ -23,6 +23,20 @@ public static class AIPlanner
     const float HAZARD_TILE_PENALTY = 6.0f;
     const float SELF_HAZARD_EXTRA_PENALTY = 2.5f;
 
+    const float STATUS_POISON_MULTIPLIER = 0.90f;
+    const float STATUS_STUN_VALUE = 9.5f;
+    const float STATUS_FREEZE_VALUE = 11.0f;
+    const float STATUS_SLOW_PER_TILE = 2.25f;
+    const float STATUS_COUNTER_VALUE = 4.0f;
+    const float STATUS_INVINCIBLE_VALUE = 8.0f;
+    const float STATUS_SHIELD_MULTIPLIER = 0.85f;
+
+    // 이미 같은 상태가 있으면 가치 감소
+    const float SAME_STATUS_DIMINISH = 0.35f;
+    const float TARGET_HAS_COUNTER_PENALTY = 5.0f;
+    const float TARGET_HAS_INVINCIBLE_PENALTY = 12.0f;
+    const float TARGET_HAS_SHIELD_PENALTY_MULTIPLIER = 0.6f;
+
     public struct ActionCandidate
     {
         public Vector2Int moveTile;
@@ -59,6 +73,9 @@ public static class AIPlanner
         if (actor == null || actor.IsDead || grid == null || profile == null || skillPool == null || skillPool.Length == 0)
             return default;
 
+        if (!actor.CanAct())
+            return default;
+
         var usableSkills = new List<SkillData>(skillPool.Length);
         foreach (var skill in skillPool)
         {
@@ -69,7 +86,10 @@ public static class AIPlanner
 
         var band = GetDesiredRangeBand(usableSkills.ToArray(), profile);
 
-        var costs = grid.GetReachableCosts(actor, actor.moveRange);
+        int effectiveMoveRange = actor.GetEffectiveMoveRange();
+        var costs = actor.CanMove()
+            ? grid.GetReachableCosts(actor, effectiveMoveRange)
+            : new Dictionary<Vector2Int, int> { { actor.GridPos, 0 } };
         var tiles = BuildTileCandidates(actor, actorEnemies, usableSkills, costs, profile, band, grid);
 
         var candidates = new List<ActionCandidate>(128);
@@ -270,6 +290,7 @@ public static class AIPlanner
     )
     {
         if (actor == null || skill == null || grid == null) return;
+        if (!actor.CanAct()) return;
         if (!actor.CanPayAP(skill.costAP)) return;
 
         float threat = EstimateThreatCount(fromTile, enemies, opponentSkillPool, grid);
@@ -465,45 +486,83 @@ public static class AIPlanner
         {
             if (!IsAlive(t)) continue;
 
-            float v = ScoreSingleTargetValue(actor, fromTile, skill, t, profile);
+            bool isEnemy = enemies != null && enemies.Contains(t);
+            bool isAlly = allies != null && allies.Contains(t);
 
-            if (enemies != null && enemies.Contains(t))
+            float v = ScoreSingleTargetValue(actor, fromTile, skill, t, isEnemy, profile);
+
+            if (isEnemy)
             {
                 sum += v;
             }
-            else if (allies != null && allies.Contains(t))
+            else if (isAlly)
             {
-                // Friendly Fire / 아군 오타겟은 강한 감점
-                sum -= v * FRIENDLY_FIRE_MULTIPLIER;
+                if (IsMostlyHelpfulSkill(skill))
+                    sum += v;
+                else
+                    sum -= Mathf.Abs(v) * FRIENDLY_FIRE_MULTIPLIER;
             }
         }
 
         return sum;
     }
 
-    static float ScoreSingleTargetValue(Unit actor, Vector2Int fromTile, SkillData skill, Unit target, AIProfile profile)
+    static float ScoreSingleTargetValue(
+        Unit actor,
+        Vector2Int fromTile,
+        SkillData skill,
+        Unit target,
+        bool targetIsEnemy,
+        AIProfile profile)
     {
-        float value = EstimateSkillValue(skill, target, profile);
+        float value = EstimateSkillValueForRelation(skill, target, targetIsEnemy, profile);
 
         if (target != null && !target.IsDead)
         {
             float hp01 = target.maxHP <= 0 ? 1f : (target.currentHP / (float)target.maxHP);
-            value += (1f - hp01) * profile.weightFocusLowHP;
 
-            int d = Manhattan(fromTile, target.GridPos);
-            value += Mathf.Max(0f, (10f - d)) * profile.weightNearest * 0.1f;
+            if (targetIsEnemy)
+            {
+                value += (1f - hp01) * profile.weightFocusLowHP;
+
+                int d = Manhattan(fromTile, target.GridPos);
+                value += Mathf.Max(0f, (10f - d)) * profile.weightNearest * 0.1f;
+
+                // 반격/무적/실드 적은 공격 가치 감소
+                if (target.HasCounterReady())
+                    value -= TARGET_HAS_COUNTER_PENALTY;
+
+                if (target.HasInvincible())
+                    value -= TARGET_HAS_INVINCIBLE_PENALTY;
+
+                var shield = target.GetShieldStatus();
+                if (shield != null && shield.ShieldAmount > 0)
+                    value -= shield.ShieldAmount * TARGET_HAS_SHIELD_PENALTY_MULTIPLIER;
+            }
+            else
+            {
+                value += (1f - hp01) * profile.weightFocusLowHP * 0.8f;
+            }
         }
 
         return value;
-    }
-
-    static float EstimateSkillValue(SkillData skill, Unit target, AIProfile profile)
+    }    
+    
+    static float EstimateSkillValueForRelation(SkillData skill, Unit target, bool targetIsEnemy, AIProfile profile)
     {
+        if (skill == null || skill.effects == null)
+            return 0f;
+
         float dmg = 0f;
         float heal = 0f;
         float burn = 0f;
-
-        if (skill == null || skill.effects == null) return 0f;
+        float poison = 0f;
+        float stun = 0f;
+        float freeze = 0f;
+        float slow = 0f;
+        float counter = 0f;
+        float invincible = 0f;
+        float shield = 0f;
 
         foreach (var e in skill.effects)
         {
@@ -512,11 +571,21 @@ public static class AIPlanner
             if (e is DealDamageEffect dd) dmg += dd.damage;
             if (e is HealEffect he) heal += he.healAmount;
             if (e is BurnApplyEffect ba) burn += ba.damagePerTurn * ba.durationTurns;
+            if (e is PoisonApplyEffect pa) poison += pa.damagePerTurn * pa.durationTurns;
+            if (e is StunApplyEffect sa) stun += STATUS_STUN_VALUE * Mathf.Max(1, sa.durationTurns);
+            if (e is FreezeApplyEffect fa) freeze += STATUS_FREEZE_VALUE * Mathf.Max(1, fa.durationTurns);
+            if (e is SlowApplyEffect sla) slow += STATUS_SLOW_PER_TILE * Mathf.Max(1, sla.movePenalty) * Mathf.Max(1, sla.durationTurns);
+            if (e is CounterApplyEffect ca) counter += STATUS_COUNTER_VALUE * Mathf.Max(1, ca.durationTurns);
+            if (e is InvincibleApplyEffect ia) invincible += STATUS_INVINCIBLE_VALUE * Mathf.Max(1, ia.durationTurns);
+            if (e is ShieldApplyEffect sha) shield += sha.shieldAmount * Mathf.Max(1, sha.durationTurns) * STATUS_SHIELD_MULTIPLIER;
         }
 
         float value = 0f;
 
-        if (target != null)
+        if (target == null)
+            return 0f;
+
+        if (targetIsEnemy)
         {
             if (dmg > 0f)
             {
@@ -527,6 +596,28 @@ public static class AIPlanner
                     value += profile.weightKill;
             }
 
+            value += burn * profile.weightBurn;
+            value += poison * (profile.weightBurn * STATUS_POISON_MULTIPLIER);
+
+            value += EvaluateStatusBonusVsTarget(target, StatusId.Stun, stun);
+            value += EvaluateStatusBonusVsTarget(target, StatusId.Freeze, freeze);
+            value += EvaluateStatusBonusVsTarget(target, StatusId.Slow, slow);
+
+            // 적에게 버프를 주는 효과는 감점
+            value -= EvaluateStatusBonusVsTarget(target, StatusId.Counter, counter) * 0.8f;
+            value -= EvaluateStatusBonusVsTarget(target, StatusId.Invincible, invincible) * 1.0f;
+            value -= EvaluateStatusBonusVsTarget(target, StatusId.Shield, shield) * 0.9f;
+
+            // 처치가 확정이면 CC 과투자 감소
+            if (target.currentHP > 0 && dmg >= target.currentHP)
+            {
+                value -= stun * 0.35f;
+                value -= freeze * 0.40f;
+                value -= slow * 0.25f;
+            }
+        }
+        else
+        {
             if (heal > 0f)
             {
                 float missing = Mathf.Max(0f, target.maxHP - target.currentHP);
@@ -534,14 +625,72 @@ public static class AIPlanner
                 value += cappedHeal * (profile.weightDamage * 0.7f);
             }
 
-            value += burn * profile.weightBurn;
+            value += EvaluateStatusBonusVsTarget(target, StatusId.Counter, counter);
+            value += EvaluateStatusBonusVsTarget(target, StatusId.Invincible, invincible);
+            value += EvaluateStatusBonusVsTarget(target, StatusId.Shield, shield);
+
+            // 아군에게 해로운 상태/피해를 주는 스킬은 감점
+            value -= dmg * profile.weightDamage;
+            value -= burn * profile.weightBurn;
+            value -= poison * (profile.weightBurn * STATUS_POISON_MULTIPLIER);
+            value -= stun;
+            value -= freeze;
+            value -= slow;
         }
-        else
+
+        return value;
+    }
+
+    static float EstimateSkillValue(SkillData skill, Unit target, AIProfile profile)
+    {
+        return EstimateSkillValueForRelation(skill, target, true, profile);
+    }
+
+    static bool IsMostlyHelpfulSkill(SkillData skill)
+    {
+        if (skill == null || skill.effects == null)
+            return false;
+
+        float helpful = 0f;
+        float harmful = 0f;
+
+        foreach (var e in skill.effects)
         {
-            value += dmg * profile.weightDamage;
-            value += burn * profile.weightBurn;
-            value += heal * (profile.weightDamage * 0.7f);
+            if (e == null) continue;
+
+            if (e is HealEffect he) helpful += he.healAmount;
+            if (e is ShieldApplyEffect sha) helpful += sha.shieldAmount;
+            if (e is InvincibleApplyEffect) helpful += 8f;
+            if (e is CounterApplyEffect) helpful += 4f;
+
+            if (e is DealDamageEffect dd) harmful += dd.damage;
+            if (e is BurnApplyEffect ba) harmful += ba.damagePerTurn * ba.durationTurns;
+            if (e is PoisonApplyEffect pa) harmful += pa.damagePerTurn * pa.durationTurns;
+            if (e is StunApplyEffect) harmful += 8f;
+            if (e is FreezeApplyEffect) harmful += 10f;
+            if (e is SlowApplyEffect sla) harmful += sla.movePenalty * sla.durationTurns * 2f;
         }
+
+        return helpful > harmful;
+    }
+
+    static float EvaluateStatusBonusVsTarget(Unit target, StatusId id, float rawValue)
+    {
+        if (target == null || rawValue <= 0f)
+            return rawValue;
+
+        var existing = target.GetStatus(id);
+        if (existing == null || existing.IsExpired)
+            return rawValue;
+
+        float value = rawValue * SAME_STATUS_DIMINISH;
+
+        if (existing.remainingTurns >= 2)
+            value *= 0.75f;
+
+        // Shield는 현재 보유량이 이미 크면 추가 실드 가치 더 감소
+        if (id == StatusId.Shield && existing.power >= 5)
+            value *= 0.7f;
 
         return value;
     }

@@ -51,6 +51,11 @@ public class BattleController : MonoBehaviour
     public bool IsBusy => busy;
     public bool IsWaitingInput => waitingInput;
 
+    private int cachedMoveRange = -1;
+    private int cachedStatusRevision = -1;
+
+    private bool isCounterAttackInProgress = false;
+
     public bool HasLockedAOETarget =>
         PlannedSkill != null &&
         PlannedSkill.targetMode == SkillTargetMode.ClickTileAOE &&
@@ -261,7 +266,6 @@ public class BattleController : MonoBehaviour
         reachableMoveCameFromCache = null;
         if (battleEnded) return;
 
-        // 승패 체크
         if (IsTeamDead(enemies))
         {
             EndBattle("YOU WIN");
@@ -273,14 +277,12 @@ public class BattleController : MonoBehaviour
             return;
         }
 
-        // 현재 라운드 소진 / 비어있으면 재생성
         if (turnOrder.Count == 0 || turnIndex >= turnOrder.Count)
         {
             BuildTurnOrder();
             turnIndex = 0;
         }
 
-        // 다음 살아있는 유닛 찾기(죽었으면 스킵)
         activeUnit = null;
         while (turnIndex < turnOrder.Count)
         {
@@ -288,23 +290,11 @@ public class BattleController : MonoBehaviour
             if (cand != null && !cand.IsDead)
             {
                 activeUnit = cand;
-                reachableMoveCache = null;
-                reachableMoveCameFromCache = null;                
                 break;
             }
             turnIndex++;
         }
 
-        
-        if (activeUnit.IsDead)
-        {
-            // 턴 시작 도중 죽었으면 이 유닛 행동 없이 다음으로
-            turnIndex++;
-            StartNextTurn();
-            return;
-        }
-
-        // 라운드 끝(전부 죽었거나 스킵되었음) → 다음 라운드
         if (activeUnit == null)
         {
             BuildTurnOrder();
@@ -312,13 +302,37 @@ public class BattleController : MonoBehaviour
             StartNextTurn();
             return;
         }
+
+        // 핵심: tick 전에 이번 턴 행동 가능 여부를 캡처
+        bool canActAtTurnStart = activeUnit.CanAct();
+        bool canMoveAtTurnStart = activeUnit.CanMove();
+
         activeUnit.OnTurnStart();
+
+        if (activeUnit == null || activeUnit.IsDead)
+        {
+            turnIndex++;
+            StartNextTurn();
+            return;
+        }
 
         busy = false;
         waitingInput = false;
 
         if (turnText)
             turnText.text = $"{activeUnit.name} TURN (SPD {activeUnit.speed})";
+
+        // 핵심: tick 후 제거됐더라도, 턴 시작 시 행동불가였으면 이번 턴은 스킵
+        if (!canActAtTurnStart)
+        {
+            SetSkillButtonsInteractable(false);
+
+            if (turnText)
+                turnText.text = $"{activeUnit.name} TURN (SKIPPED)";
+
+            OnActionComplete();
+            return;
+        }
 
         if (IsAlly(activeUnit))
         {
@@ -329,19 +343,25 @@ public class BattleController : MonoBehaviour
             SetupSkillButtons();
             SetSkillButtonsInteractable(true);
 
-            var data = grid.GetReachableData(activeUnit, activeUnit.moveRange);
-            reachableMoveCache = data.cost;
-            reachableMoveCameFromCache = data.cameFrom;
+            RebuildReachableMoveCache();
             inputMode = PlayerInputMode.Move;
 
-            if (tileHighlighter) tileHighlighter.ShowMoveTiles(reachableMoveCache.Keys);
+            if (!canMoveAtTurnStart)
+            {
+                reachableMoveCache = null;
+                reachableMoveCameFromCache = null;
+                if (tileHighlighter) tileHighlighter.ClearAll();
+            }
+            else
+            {
+                if (tileHighlighter && reachableMoveCache != null)
+                    tileHighlighter.ShowMoveTiles(reachableMoveCache.Keys);
+            }
         }
         else
         {
-            // 적 AI 턴
             SetSkillButtonsInteractable(false);
             busy = true;
-
             StartCoroutine(EnemyTurnRoutine(activeUnit, OnActionComplete));
         }
     }
@@ -394,6 +414,7 @@ public class BattleController : MonoBehaviour
         if (battleEnded) return;
         if (!waitingInput || busy) return;
         if (activeUnit == null || activeUnit.IsDead) return;
+        if (!activeUnit.CanAct()) return;
 
         var pool = GetSkillPoolFor(activeUnit);
         if (pool == null) return;
@@ -434,9 +455,21 @@ public class BattleController : MonoBehaviour
         yield return RunSkill(attacker, skill, onComplete, null, null);
     }
 
-    IEnumerator RunSkill(Unit attacker, SkillData skill, System.Action onComplete, Vector2Int? clickedTile, Unit clickedUnit)
+    IEnumerator RunSkill(
+        Unit attacker,
+        SkillData skill,
+        System.Action onComplete,
+        Vector2Int? clickedTile,
+        Unit clickedUnit,
+        bool spendAP = true)
     {
-        if (attacker == null || skill == null)
+        if (attacker == null || skill == null || attacker.IsDead)
+        {
+            onComplete?.Invoke();
+            yield break;
+        }
+
+        if (!attacker.CanAct())
         {
             onComplete?.Invoke();
             yield break;
@@ -457,14 +490,35 @@ public class BattleController : MonoBehaviour
             yield break;
         }
 
-        if (!attacker.SpendAP(skill.costAP))
+        if (spendAP)
         {
-            onComplete?.Invoke();
-            yield break;
+            if (!attacker.SpendAP(skill.costAP))
+            {
+                onComplete?.Invoke();
+                yield break;
+            }
         }
 
         bool hitDone = false;
         bool endDone = false;
+
+        IEnumerator ApplyEffectsAndCounters()
+        {
+            for (int i = 0; i < targets.Count; i++)
+            {
+                var t = targets[i];
+                if (t == null || t.IsDead)
+                    continue;
+
+                ApplySkillEffects(skill, attacker, t);
+
+                // 단일 공격 Counter 체크
+                if (IsSingleTargetCounterable(skill, targets, t))
+                {
+                    yield return TryRunCounterAttack(t, attacker);
+                }
+            }
+        }
 
         void OnHit()
         {
@@ -487,34 +541,44 @@ public class BattleController : MonoBehaviour
 
         if (skill.timing == SkillTiming.Immediate)
         {
-            foreach (var tt in targets)
-                if (tt != null && !tt.IsDead)
-                    ApplySkillEffects(skill, attacker, tt);
+            yield return ApplyEffectsAndCounters();
             hitDone = true;
         }
         else if (skill.timing == SkillTiming.OnAttackHit)
         {
-            while (!hitDone && t < timeout) { t += Time.deltaTime; yield return null; }
+            while (!hitDone && t < timeout)
+            {
+                t += Time.deltaTime;
+                yield return null;
+            }
         }
         else if (skill.timing == SkillTiming.OnAttackEnd)
         {
-            while (!endDone && t < timeout) { t += Time.deltaTime; yield return null; }
+            while (!endDone && t < timeout)
+            {
+                t += Time.deltaTime;
+                yield return null;
+            }
+
             if (!hitDone)
             {
-                foreach (var tt in targets)
-                    if (tt != null && !tt.IsDead)
-                        ApplySkillEffects(skill, attacker, tt);
+                yield return ApplyEffectsAndCounters();
                 hitDone = true;
             }
         }
 
         t = 0f;
-        while (!endDone && t < timeout) { t += Time.deltaTime; yield return null; }
+        while (!endDone && t < timeout)
+        {
+            t += Time.deltaTime;
+            yield return null;
+        }
 
         attacker.AttackHitEvent -= OnHit;
         attacker.AttackEndEvent -= OnEnd;
 
         onComplete?.Invoke();
+
     }
 
     void ApplySkillEffects(SkillData skill, Unit attacker, Unit defender)
@@ -616,9 +680,15 @@ public class BattleController : MonoBehaviour
             playerSkills   // 적 기준 상대 스킬풀(Threat 계산용)
         );
         
-        if (plan.moveTile != enemy.GridPos)
+        if (!enemy.CanAct())
         {
-            var path = grid.FindPathWithinRange(enemy, plan.moveTile, enemy.moveRange);
+            onComplete?.Invoke();
+            yield break;
+        }
+
+        if (plan.moveTile != enemy.GridPos && enemy.CanMove())
+        {
+            var path = grid.FindPathWithinRange(enemy, plan.moveTile, enemy.GetEffectiveMoveRange());
             if (path != null)
                 yield return StartCoroutine(grid.MovePathRoutine(enemy, path));
         }
@@ -629,7 +699,6 @@ public class BattleController : MonoBehaviour
             onComplete?.Invoke();
             yield break;
         }
-        Debug.Log($"[AI MOVE CHECK] planned={plan.moveTile} actual={enemy.GridPos}");
         // ✅ 스킬이 없으면 이동만 하고 종료
         if (plan.skill == null)
         {
@@ -831,10 +900,13 @@ public class BattleController : MonoBehaviour
         // 이동 클릭
         if (hasMovedThisTurn) return;
         if (inputMode != PlayerInputMode.Move) return;
+        if (!activeUnit.CanMove()) return;
+
+        EnsureReachableMoveCacheCurrent();
 
         if (reachableMoveCache == null || reachableMoveCameFromCache == null)
         {
-            var data = grid.GetReachableData(activeUnit, activeUnit.moveRange);
+            var data = grid.GetReachableData(activeUnit, GetCurrentMoveRange(activeUnit));
             reachableMoveCache = data.cost;
             reachableMoveCameFromCache = data.cameFrom;
         }
@@ -914,12 +986,15 @@ public class BattleController : MonoBehaviour
         if (battleEnded) return;
         if (activeUnit == null || activeUnit.IsDead) return;
         if (inputMode != PlayerInputMode.Move) return;
+        if (!activeUnit.CanMove()) return;
         if (tileHighlighter == null) return;
+
+        EnsureReachableMoveCacheCurrent();
 
         // 캐시 없으면(정상 흐름이면 거의 없음) 생성
         if (reachableMoveCache == null || reachableMoveCameFromCache == null)
         {
-            var data = grid.GetReachableData(activeUnit, activeUnit.moveRange);
+            var data = grid.GetReachableData(activeUnit, GetCurrentMoveRange(activeUnit));
             reachableMoveCache = data.cost;
             reachableMoveCameFromCache = data.cameFrom;
         }
@@ -949,7 +1024,7 @@ public class BattleController : MonoBehaviour
         if (path == null)
         {
             // 캐시가 꼬였을 가능성 있으니 1회 재생성
-            var data = grid.GetReachableData(activeUnit, activeUnit.moveRange);
+            var data = grid.GetReachableData(activeUnit, GetCurrentMoveRange(activeUnit));
             reachableMoveCache = data.cost;
             reachableMoveCameFromCache = data.cameFrom;
 
@@ -1004,18 +1079,14 @@ public class BattleController : MonoBehaviour
 
         if (activeUnit == null || activeUnit.IsDead) return;
 
-        if (!hasMovedThisTurn && inputMode == PlayerInputMode.Move)
+        if (!hasMovedThisTurn && inputMode == PlayerInputMode.Move && activeUnit.CanMove())
         {
-            if (reachableMoveCache == null || reachableMoveCameFromCache == null)
-            {
-                var data = grid.GetReachableData(activeUnit, activeUnit.moveRange);
-                reachableMoveCache = data.cost;
-                reachableMoveCameFromCache = data.cameFrom;
-            }
+            EnsureReachableMoveCacheCurrent();
 
-            if (tileHighlighter) tileHighlighter.ShowMoveTiles(reachableMoveCache.Keys);
+            if (tileHighlighter && reachableMoveCache != null)
+                tileHighlighter.ShowMoveTiles(reachableMoveCache.Keys);
 
-            if (PlannedMoveTile.HasValue)
+            if (PlannedMoveTile.HasValue && reachableMoveCameFromCache != null)
             {
                 var path = grid.ReconstructPath(activeUnit.GridPos, PlannedMoveTile.Value, reachableMoveCameFromCache);
 
@@ -1156,6 +1227,15 @@ public class BattleController : MonoBehaviour
                 if (action.skill == null)
                     continue;
 
+                if (!activeUnit.CanAct())
+                {
+                    busy = false;
+                    waitingInput = true;
+                    SetSkillButtonsInteractable(true);
+                    RefreshPlanningVisuals();
+                    yield break;
+                }
+
                 if (RequiresExplicitTarget(action.skill) && !HasExplicitTarget(action))
                 {
                     busy = false;
@@ -1295,14 +1375,10 @@ public class BattleController : MonoBehaviour
 
     private void PlanMove(Vector2Int gridPos)
     {
-        if (reachableMoveCache == null || reachableMoveCameFromCache == null)
-        {
-            var data = grid.GetReachableData(activeUnit, activeUnit.moveRange);
-            reachableMoveCache = data.cost;
-            reachableMoveCameFromCache = data.cameFrom;
-        }
+        EnsureReachableMoveCacheCurrent();
 
-        if (!reachableMoveCache.ContainsKey(gridPos)) return;
+        if (reachableMoveCache == null || !reachableMoveCache.ContainsKey(gridPos))
+            return;
 
         if (gridPos == activeUnit.GridPos)
         {
@@ -1436,5 +1512,173 @@ public class BattleController : MonoBehaviour
             default:
                 return true;
         }
+    }
+
+    private int GetCurrentMoveRange(Unit unit)
+    {
+        if (unit == null) return 0;
+        return Mathf.Max(0, unit.GetEffectiveMoveRange());
+    }
+
+    private void RebuildReachableMoveCache()
+    {
+        reachableMoveCache = null;
+        reachableMoveCameFromCache = null;
+        cachedMoveRange = -1;
+        cachedStatusRevision = -1;
+
+        if (grid == null) grid = GridManager.I;
+        if (grid == null || activeUnit == null || activeUnit.IsDead) return;
+        if (!activeUnit.CanMove()) return;
+
+        int moveRange = GetCurrentMoveRange(activeUnit);
+        var data = grid.GetReachableData(activeUnit, moveRange);
+
+        reachableMoveCache = data.cost;
+        reachableMoveCameFromCache = data.cameFrom;
+        cachedMoveRange = moveRange;
+        cachedStatusRevision = activeUnit.StatusRevision;
+    }
+
+    private void EnsureReachableMoveCacheCurrent()
+    {
+        if (activeUnit == null || activeUnit.IsDead)
+        {
+            reachableMoveCache = null;
+            reachableMoveCameFromCache = null;
+            cachedMoveRange = -1;
+            cachedStatusRevision = -1;
+            return;
+        }
+
+        int nowRange = GetCurrentMoveRange(activeUnit);
+        int nowRevision = activeUnit.StatusRevision;
+
+        bool dirty =
+            reachableMoveCache == null ||
+            reachableMoveCameFromCache == null ||
+            cachedMoveRange != nowRange ||
+            cachedStatusRevision != nowRevision;
+
+        if (dirty)
+            RebuildReachableMoveCache();
+    }
+
+    private bool IsSingleTargetCounterable(SkillData skill, List<Unit> resolvedTargets, Unit defender)
+    {
+        if (skill == null || defender == null || resolvedTargets == null)
+            return false;
+
+        if (isCounterAttackInProgress)
+            return false;
+
+        if (defender.IsDead)
+            return false;
+
+        if (!defender.CanAct())
+            return false;
+
+        if (!defender.HasCounterReady())
+            return false;
+
+        if (!IsOffensiveSkill(skill))
+            return false;
+
+        // AOE는 반격 불가
+        if (skill.targetMode == SkillTargetMode.ClickTileAOE)
+            return false;
+
+        // 단일 공격만 허용
+        // ResolveTargets 결과가 정확히 1명이고 그 1명이 defender여야 함
+        if (resolvedTargets.Count != 1)
+            return false;
+
+        if (resolvedTargets[0] != defender)
+            return false;
+
+        return true;
+    }
+
+    private SkillData ChooseCounterSkill(Unit counterUnit, Unit attacker)
+    {
+        if (counterUnit == null || attacker == null) return null;
+        if (counterUnit.IsDead || attacker.IsDead) return null;
+
+        var pool = GetSkillPoolFor(counterUnit);
+        if (pool == null || pool.Length == 0) return null;
+
+        for (int i = 0; i < pool.Length; i++)
+        {
+            var skill = pool[i];
+            if (skill == null) continue;
+
+            // 반격은 단일 공격만 허용
+            if (skill.targetMode != SkillTargetMode.ClickSingle &&
+                skill.targetMode != SkillTargetMode.AutoNearestSingle)
+                continue;
+
+            int dist = Mathf.Abs(counterUnit.GridPos.x - attacker.GridPos.x)
+                    + Mathf.Abs(counterUnit.GridPos.y - attacker.GridPos.y);
+
+            if (dist < skill.minRange || dist > skill.maxRange)
+                continue;
+
+            if (skill.requiresLineOfSight && !grid.HasLineOfSight(counterUnit.GridPos, attacker.GridPos))
+                continue;
+
+            return skill;
+        }
+
+        return null;
+    }
+
+    private IEnumerator TryRunCounterAttack(Unit defender, Unit originalAttacker)
+    {
+        if (defender == null || originalAttacker == null)
+            yield break;
+
+        if (defender.IsDead || originalAttacker.IsDead)
+            yield break;
+
+        if (isCounterAttackInProgress)
+            yield break;
+
+        var counterSkill = ChooseCounterSkill(defender, originalAttacker);
+        if (counterSkill == null)
+            yield break;
+
+        isCounterAttackInProgress = true;
+
+        yield return RunSkill(
+            defender,
+            counterSkill,
+            null,
+            null,
+            originalAttacker,
+            false
+        );
+        defender.RemoveStatus(StatusId.Counter);
+        isCounterAttackInProgress = false;
+    }
+
+    private bool IsOffensiveSkill(SkillData skill)
+    {
+        if (skill == null || skill.effects == null)
+            return false;
+
+        for (int i = 0; i < skill.effects.Length; i++)
+        {
+            var e = skill.effects[i];
+            if (e == null) continue;
+
+            if (e is DealDamageEffect) return true;
+            if (e is BurnApplyEffect) return true;
+            if (e is PoisonApplyEffect) return true;
+            if (e is StunApplyEffect) return true;
+            if (e is FreezeApplyEffect) return true;
+            if (e is SlowApplyEffect) return true;
+        }
+
+        return false;
     }
 }
