@@ -12,5 +12,5 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f8300a5c23cf82440b46dc9506a1cf8f, type: 3}
   m_Name: BurnApply_
   m_EditorClassIdentifier: Assembly-CSharp::BurnApplyEffect
-  damagePerTurn: 3
-  durationTurns: 3
+  damagePerTurn: 5
+  durationTurns: 2

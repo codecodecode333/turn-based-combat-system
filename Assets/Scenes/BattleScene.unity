@@ -2310,6 +2310,14 @@ PrefabInstance:
       propertyPath: targetIndicator
       value: 
       objectReference: {fileID: 8601094974122874342}
+    - target: {fileID: 6541947794648351540, guid: 0402c8c641b24064b8202c3b1c47fa13, type: 3}
+      propertyPath: m_VerticalAlignment
+      value: 256
+      objectReference: {fileID: 0}
+    - target: {fileID: 6541947794648351540, guid: 0402c8c641b24064b8202c3b1c47fa13, type: 3}
+      propertyPath: m_HorizontalAlignment
+      value: 2
+      objectReference: {fileID: 0}
     - target: {fileID: 6912995081859625821, guid: 0402c8c641b24064b8202c3b1c47fa13, type: 3}
       propertyPath: maxAP
       value: 6

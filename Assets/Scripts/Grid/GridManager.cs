@@ -369,17 +369,28 @@ public class GridManager : MonoBehaviour
     /// - path는 FindPathWithinRange/ReconstructPath 형태(= start 제외, goal 포함)로 들어오는 것을 전제.
     /// - 이동 도중 막히면 즉시 중단한다(턴제에서는 보통 충분).
     /// </summary>
-    public IEnumerator MovePathRoutine(Unit u, List<Vector2Int> path)
+    public IEnumerator MovePathRoutine(Unit u, List<Vector2Int> path, System.Action<Unit, Vector2Int> onStepEntered = null)
     {
         if (u == null || path == null) yield break;
 
         foreach (var step in path)
         {
-            // 동적 점유(다른 유닛이 들어온 경우 등) 대비: 스텝마다 검증
-            if (!CanStandFor(u, u.GridPos, step)) yield break;
-            // 기존 MoveRoutine은 논리 이동 확정 + 보간 이동
+            if (!CanStandFor(u, u.GridPos, step))
+                yield break;
+
             yield return StartCoroutine(MoveRoutine(u, step));
+
+            onStepEntered?.Invoke(u, step);
+
+            if (u == null || u.IsDead)
+                yield break;
         }
+    }
+
+    public TileData GetTileData(Vector2Int pos)
+    {
+        var tile = GetTileView(pos);
+        return tile != null ? tile.tileData : null;
     }
 
     public TileView GetTile(Vector2Int p)

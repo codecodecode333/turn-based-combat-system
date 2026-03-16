@@ -61,6 +61,12 @@ public class BattleController : MonoBehaviour
         PlannedSkill.targetMode == SkillTargetMode.ClickTileAOE &&
         PlannedClickedTile.HasValue;
 
+    private struct HazardResolveResult
+    {
+        public bool triggered;
+        public bool stopMovement;
+        public bool consumedTile;
+    }
     // =========================
     // Action Queue
     // =========================
@@ -308,6 +314,7 @@ public class BattleController : MonoBehaviour
         bool canMoveAtTurnStart = activeUnit.CanMove();
 
         activeUnit.OnTurnStart();
+        ApplyTileHazardOnTurnStart(activeUnit);
 
         if (activeUnit == null || activeUnit.IsDead)
         {
@@ -382,12 +389,31 @@ public class BattleController : MonoBehaviour
         if (tileHighlighter) tileHighlighter.ClearAll();
 
         if (activeUnit != null && !activeUnit.IsDead)
+        {
             activeUnit.OnTurnEnd();
-
+            ApplyTileHazardOnTurnEnd(activeUnit);
+        }
         turnIndex++;
         StartNextTurn();
     }
 
+    private void ApplyTileHazardOnTurnStart(Unit unit)
+    {
+        if (unit == null || unit.IsDead) return;
+        ResolveHazard(unit, unit.GridPos, HazardTriggerType.OnTurnStart);
+    }
+
+    private void ApplyTileHazardOnTurnEnd(Unit unit)
+    {
+        if (unit == null || unit.IsDead) return;
+        ResolveHazard(unit, unit.GridPos, HazardTriggerType.OnTurnEnd);
+    }
+
+    private void ApplyTileHazardOnStepEntered(Unit unit, Vector2Int step)
+    {
+        if (unit == null || unit.IsDead) return;
+        ResolveHazard(unit, step, HazardTriggerType.OnEnter);
+    }
     void EndBattle(string msg)
     {
         battleEnded = true;
@@ -690,7 +716,15 @@ public class BattleController : MonoBehaviour
         {
             var path = grid.FindPathWithinRange(enemy, plan.moveTile, enemy.GetEffectiveMoveRange());
             if (path != null)
-                yield return StartCoroutine(grid.MovePathRoutine(enemy, path));
+            {
+                    yield return StartCoroutine(
+                    grid.MovePathRoutine(
+                        enemy,
+                        path,
+                        (unit, step) => ApplyTileHazardOnStepEntered(unit, step)
+                    )
+                );
+            }
         }
 
         if (enemy.GridPos != plan.moveTile)
@@ -820,7 +854,13 @@ public class BattleController : MonoBehaviour
             SetSkillButtonsInteractable(true);
             yield break;
         }
-        yield return StartCoroutine(grid.MovePathRoutine(activeUnit, path));
+        yield return StartCoroutine(
+            grid.MovePathRoutine(
+                activeUnit,
+                path,
+                (unit, step) => ApplyTileHazardOnStepEntered(unit, step)
+            )
+        );
 
         // 이동 후: "행동 선택 상태"로 복귀
         busy = false;
@@ -1193,7 +1233,15 @@ public class BattleController : MonoBehaviour
         bool executedSkill = false;
 
         for (int i = 0; i < executeQueue.Count; i++)
-        {
+        {   
+            if (activeUnit == null || activeUnit.IsDead)
+            {
+                busy = false;
+                waitingInput = false;
+                OnActionComplete();
+                yield break;
+            }
+            
             var action = executeQueue[i];
             if (action == null) continue;
 
@@ -1213,19 +1261,41 @@ public class BattleController : MonoBehaviour
                 }
 
                 if (tileHighlighter) tileHighlighter.ClearAll();
-                yield return StartCoroutine(grid.MovePathRoutine(activeUnit, path));
+                yield return StartCoroutine(
+                    grid.MovePathRoutine(
+                        activeUnit,
+                        path,
+                        (unit, step) => ApplyTileHazardOnStepEntered(unit, step)
+                    )
+                );
+
+                reachableMoveCache = null;
+                reachableMoveCameFromCache = null;
+
+                // 이동 중 hazard/explosion 등으로 죽었으면 즉시 턴 정리
+                if (activeUnit == null || activeUnit.IsDead)
+                {
+                    busy = false;
+                    waitingInput = false;
+                    OnActionComplete();
+                    yield break;
+                }
 
                 executedAnyAction = true;
                 executedMove = true;
                 hasMovedThisTurn = true;
-
-                reachableMoveCache = null;
-                reachableMoveCameFromCache = null;
             }
             else if (action.type == PlannedActionType.Skill)
             {
                 if (action.skill == null)
                     continue;
+                if (activeUnit == null || activeUnit.IsDead)
+                {
+                    busy = false;
+                    waitingInput = false;
+                    OnActionComplete();
+                    yield break;
+                }
 
                 if (!activeUnit.CanAct())
                 {
@@ -1680,5 +1750,46 @@ public class BattleController : MonoBehaviour
         }
 
         return false;
+    }
+
+    private HazardResolveResult ResolveHazard(Unit unit, Vector2Int tilePos, HazardTriggerType trigger)
+    {
+        var result = new HazardResolveResult();
+
+        if (unit == null || unit.IsDead || grid == null)
+            return result;
+
+        var tile = grid.GetTileView(tilePos);
+        if (tile == null || tile.tileData == null)
+            return result;
+
+        if (tile.HazardType == HazardType.None)
+            return result;
+
+        if (tile.HazardTrigger != trigger)
+            return result;
+
+        int power = Mathf.Max(1, tile.HazardPower);
+        int duration = Mathf.Max(1, tile.HazardDuration);
+
+        switch (tile.HazardType)
+        {
+            case HazardType.Burn:
+                unit.AddOrRefreshStatus(new BurnStatus(power, duration, unit));
+                result.triggered = true;
+                break;
+
+            case HazardType.Poison:
+                unit.AddOrRefreshStatus(new PoisonStatus(power, duration, unit));
+                result.triggered = true;
+                break;
+
+            case HazardType.Explosion:
+                unit.TakeDamage(power);
+                result.triggered = true;
+                break;
+        }
+
+        return result;
     }
 }

@@ -20,7 +20,9 @@ public static class AIPlanner
     // 6.5~7차에서 AIProfile로 승격 권장.
     const float COST_PENALTY_PER_AP = 0.35f;
     const float FRIENDLY_FIRE_MULTIPLIER = 1.15f;
-    const float HAZARD_TILE_PENALTY = 6.0f;
+    const float HAZARD_BURN_BASE_PENALTY = 5.0f;
+    const float HAZARD_POISON_BASE_PENALTY = 6.5f;
+    const float HAZARD_EXPLOSION_BASE_PENALTY = 9.0f;
     const float SELF_HAZARD_EXTRA_PENALTY = 2.5f;
 
     const float STATUS_POISON_MULTIPLIER = 0.90f;
@@ -87,11 +89,22 @@ public static class AIPlanner
         var band = GetDesiredRangeBand(usableSkills.ToArray(), profile);
 
         int effectiveMoveRange = actor.GetEffectiveMoveRange();
-        var costs = actor.CanMove()
-            ? grid.GetReachableCosts(actor, effectiveMoveRange)
-            : new Dictionary<Vector2Int, int> { { actor.GridPos, 0 } };
-        var tiles = BuildTileCandidates(actor, actorEnemies, usableSkills, costs, profile, band, grid);
+        Dictionary<Vector2Int, int> costs;
+        Dictionary<Vector2Int, Vector2Int> cameFrom;
 
+        if (actor.CanMove())
+        {
+            var reachable = grid.GetReachableData(actor, effectiveMoveRange);
+            costs = reachable.cost;
+            cameFrom = reachable.cameFrom;
+        }
+        else
+        {
+            costs = new Dictionary<Vector2Int, int> { { actor.GridPos, 0 } };
+            cameFrom = new Dictionary<Vector2Int, Vector2Int>();
+        }
+
+        var tiles = BuildTileCandidates(actor, actorEnemies, usableSkills, costs, cameFrom, profile, band, grid);
         var candidates = new List<ActionCandidate>(128);
 
         foreach (var tile in tiles)
@@ -108,6 +121,7 @@ public static class AIPlanner
                     profile,
                     opponentSkillPool,
                     usableSkills,
+                    cameFrom,
                     candidates
                 );
             }
@@ -125,6 +139,7 @@ public static class AIPlanner
                 actorEnemies,
                 usableSkills,
                 costs,
+                cameFrom,
                 grid,
                 profile,
                 opponentSkillPool,
@@ -147,12 +162,13 @@ public static class AIPlanner
         List<Unit> enemies,
         List<SkillData> usableSkills,
         Dictionary<Vector2Int, int> costs,
+        Dictionary<Vector2Int, Vector2Int> cameFrom,
         AIProfile profile,
         (int desiredMin, int desiredMax) band,
         GridManager grid = null
     )
     {
-        var scored = new List<(Vector2Int tile, int moveCost, int primary, int nearestDist, bool hasHazard, bool canAttack)>(costs.Count);
+        var scored = new List<(Vector2Int tile, int moveCost, int primary, int nearestDist, float pathHazardPenalty, bool canAttack)>(costs.Count);
 
         foreach (var kv in costs)
         {
@@ -163,24 +179,15 @@ public static class AIPlanner
 
             int moveCost = kv.Value;
             int nearest = NearestDistanceToAny(tile, enemies);
-            bool hasHazard = TileHasHazard(grid, tile);
+            float pathHazardPenalty = GetPathHazardPenalty(actor, grid, tile, cameFrom);
             bool canAttack = CanAnySkillHitFromTile(actor, tile, usableSkills, actorAllies: null, actorEnemies: enemies, grid);
 
             int primary;
-            if (canAttack)
-            {
-                primary = 0; // 6차: 공격 가능 타일 우선
-            }
-            else if (band.desiredMin == 0 && band.desiredMax == 0)
-            {
-                primary = nearest; // 근접: 가까워지기
-            }
-            else
-            {
-                primary = DistanceOutsideBand(nearest, band.desiredMin, band.desiredMax); // 원거리: 밴드 유지
-            }
+            if (canAttack) primary = 0;
+            else if (band.desiredMin == 0 && band.desiredMax == 0) primary = nearest;
+            else primary = DistanceOutsideBand(nearest, band.desiredMin, band.desiredMax);
 
-            scored.Add((tile, moveCost, primary, nearest, hasHazard, canAttack));
+            scored.Add((tile, moveCost, primary, nearest, pathHazardPenalty, canAttack));
         }
 
         scored.Sort((a, b) =>
@@ -188,8 +195,7 @@ public static class AIPlanner
             int c = a.primary.CompareTo(b.primary);
             if (c != 0) return c;
 
-            // 위험 타일 회피 우선
-            c = a.hasHazard.CompareTo(b.hasHazard);
+            c = a.pathHazardPenalty.CompareTo(b.pathHazardPenalty);
             if (c != 0) return c;
 
             c = a.moveCost.CompareTo(b.moveCost);
@@ -216,6 +222,7 @@ public static class AIPlanner
         List<Unit> enemies,
         List<SkillData> usableSkills,
         Dictionary<Vector2Int, int> costs,
+        Dictionary<Vector2Int, Vector2Int> cameFrom,
         GridManager grid,
         AIProfile profile,
         SkillData[] opponentSkillPool,
@@ -237,7 +244,7 @@ public static class AIPlanner
 
             int nearest = NearestDistanceToAny(tile, enemies);
             float threat = EstimateThreatCount(tile, enemies, opponentSkillPool, grid);
-            float hazardPenalty = GetHazardPenalty(grid, tile);
+            float hazardPenalty = GetPathHazardPenalty(actor, grid, tile, cameFrom);
             bool canAttack = CanAnySkillHitFromTile(actor, tile, usableSkills, allies, enemies, grid);
 
             float score;
@@ -286,6 +293,7 @@ public static class AIPlanner
         AIProfile profile,
         SkillData[] opponentSkillPool,
         List<SkillData> ownUsableSkills,
+        Dictionary<Vector2Int, Vector2Int> cameFrom,
         List<ActionCandidate> outList
     )
     {
@@ -295,7 +303,7 @@ public static class AIPlanner
 
         float threat = EstimateThreatCount(fromTile, enemies, opponentSkillPool, grid);
         float risk = threat * profile.weightThreat;
-        float hazardPenalty = GetHazardPenalty(grid, fromTile);
+        float hazardPenalty = GetPathHazardPenalty(actor, grid, fromTile, cameFrom);
         float apPenalty = skill.costAP * COST_PENALTY_PER_AP;
 
         switch (skill.targetMode)
@@ -737,15 +745,33 @@ public static class AIPlanner
         var tv = grid.GetTileView(tile);
         if (tv == null || tv.tileData == null) return 0f;
 
-        if (string.IsNullOrEmpty(tv.tileData.hazardType))
-            return 0f;
+        var td = tv.tileData;
+        float powerBonus = Mathf.Max(0, td.hazardPower - 1) * 1.5f;
 
-        return HAZARD_TILE_PENALTY;
+        switch (td.hazardType)
+        {
+            case HazardType.Burn:
+                return HAZARD_BURN_BASE_PENALTY + powerBonus;
+
+            case HazardType.Poison:
+                return HAZARD_POISON_BASE_PENALTY + powerBonus;
+
+            case HazardType.Explosion:
+                return HAZARD_EXPLOSION_BASE_PENALTY + powerBonus;
+
+            default:
+                return 0f;
+        }
     }
 
     static bool TileHasHazard(GridManager grid, Vector2Int tile)
     {
-        return GetHazardPenalty(grid, tile) > 0f;
+        if (grid == null) return false;
+
+        var tv = grid.GetTileView(tile);
+        if (tv == null || tv.tileData == null) return false;
+
+        return tv.tileData.hazardType != HazardType.None;
     }
 
     // ===== AOE center candidates =====
@@ -1008,5 +1034,62 @@ public static class AIPlanner
         if (d < min) return min - d;
         if (d > max) return d - max;
         return 0;
+    }
+
+    static float GetSingleTileHazardPenalty(GridManager grid, Vector2Int tile)
+    {
+        if (grid == null) return 0f;
+
+        var tv = grid.GetTileView(tile);
+        if (tv == null || tv.tileData == null) return 0f;
+
+        var td = tv.tileData;
+        float powerBonus = Mathf.Max(0, td.hazardPower - 1) * 1.5f;
+
+        switch (td.hazardType)
+        {
+            case HazardType.Burn:
+                return 5f + powerBonus;
+            case HazardType.Poison:
+                return 6.5f + powerBonus;
+            case HazardType.Explosion:
+                return 9f + powerBonus;
+            default:
+                return 0f;
+        }
+    }
+
+    static float GetPathHazardPenalty(
+        Unit actor,
+        GridManager grid,
+        Vector2Int destination,
+        Dictionary<Vector2Int, Vector2Int> cameFrom
+    )
+    {
+        if (actor == null || grid == null)
+            return 0f;
+
+        if (destination == actor.GridPos)
+            return 0f;
+
+        var path = grid.ReconstructPath(actor.GridPos, destination, cameFrom);
+        if (path == null || path.Count == 0)
+            return 0f;
+
+        float sum = 0f;
+
+        foreach (var step in path)
+        {
+            var tv = grid.GetTileView(step);
+            if (tv == null || tv.tileData == null)
+                continue;
+
+            if (tv.tileData.hazardTrigger != HazardTriggerType.OnEnter)
+                continue;
+
+            sum += GetSingleTileHazardPenalty(grid, step);
+        }
+
+        return sum;
     }
 }
