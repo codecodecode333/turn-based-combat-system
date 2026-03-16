@@ -7,24 +7,29 @@ public class TileHighlighter : MonoBehaviour
     public GridManager grid;
 
     [Header("Prefabs")]
-    public GameObject moveTilePrefab;   // Blue
-    public GameObject pathTilePrefab;     // Blue Strong (강조)
-    public GameObject rangePrefab;      // Red (사거리)
-    public GameObject targetPrefab;     // Red Strong (타겟 강조)  <-- 추가
+    public GameObject moveTilePrefab;
+    public GameObject pathTilePrefab;
+    public GameObject rangePrefab;
+    public GameObject targetPrefab;
     public GameObject ghostTilePrefab;
     public GameObject invalidTilePrefab;
+    [SerializeField] private GameObject hazardPathPrefab;
 
-    private readonly Dictionary<Vector2Int, GameObject> moveActive  = new(128);
+    private readonly Dictionary<Vector2Int, GameObject> moveActive = new(128);
     private readonly Dictionary<Vector2Int, GameObject> rangeActive = new(256);
-    private readonly Dictionary<Vector2Int, GameObject> targetActive= new(64);
+    private readonly Dictionary<Vector2Int, GameObject> targetActive = new(64);
     private readonly Dictionary<Vector2Int, GameObject> pathActive = new(64);
+    private readonly Dictionary<Vector2Int, GameObject> plannedPathActive = new(64);
     private readonly Dictionary<Vector2Int, GameObject> ghostActive = new();
     private readonly Dictionary<Vector2Int, GameObject> invalidActive = new();
 
-    private readonly Dictionary<Vector2Int, (Sprite sprite, Color color)> moveBackup  = new(64);
+    private readonly Dictionary<Vector2Int, (Sprite sprite, Color color)> moveBackup = new(64);
     private readonly Dictionary<Vector2Int, (Sprite sprite, Color color)> rangeBackup = new(64);
-    private readonly HashSet<Vector2Int> pathOverlaySet   = new(64);
+    private readonly HashSet<Vector2Int> pathOverlaySet = new(64);
     private readonly HashSet<Vector2Int> targetOverlaySet = new(64);
+
+    private readonly List<GameObject> hoverHazardPathPool = new List<GameObject>();
+    private readonly List<GameObject> plannedHazardPathPool = new List<GameObject>();
 
     void Awake()
     {
@@ -37,15 +42,18 @@ public class TileHighlighter : MonoBehaviour
         ClearRange();
         ClearTarget();
         ClearPath();
+        ClearPlannedPath();
         ClearGhost();
         ClearInvalid();
+        ClearHazardPath();
     }
 
-    public void ClearMove()   => ClearDict(moveActive);
-    public void ClearRange()  => ClearDict(rangeActive);
+    public void ClearMove() => ClearDict(moveActive);
+    public void ClearRange() => ClearDict(rangeActive);
     public void ClearTarget() => ClearDict(targetActive);
     public void ClearGhost() => ClearDict(ghostActive);
     public void ClearInvalid() => ClearDict(invalidActive);
+    public void ClearPlannedPath() => ClearDict(plannedPathActive);
 
     void ClearDict(Dictionary<Vector2Int, GameObject> dict)
     {
@@ -54,9 +62,6 @@ public class TileHighlighter : MonoBehaviour
         dict.Clear();
     }
 
-    // -------------------------
-    // Move (Blue)
-    // -------------------------
     public void ShowReachableMoveTiles(Unit unit)
     {
         if (unit == null) return;
@@ -85,9 +90,6 @@ public class TileHighlighter : MonoBehaviour
         }
     }
 
-    // -------------------------
-    // Range (Red)
-    // -------------------------
     public void ShowRangeTiles(IEnumerable<Vector2Int> tiles)
     {
         if (!grid) grid = GridManager.I;
@@ -95,8 +97,7 @@ public class TileHighlighter : MonoBehaviour
 
         ClearRange();
         ClearTargetOverlay();
-        ClearTarget(); // 범위가 바뀌면 타겟도 리셋
-
+        ClearTarget();
 
         foreach (var p in tiles)
         {
@@ -105,18 +106,15 @@ public class TileHighlighter : MonoBehaviour
         }
     }
 
-    // -------------------------
-    // Targets (Strong Red)
-    // -------------------------
     public void ShowTargetTiles(IEnumerable<Vector2Int> tiles)
     {
         if (!grid) grid = GridManager.I;
         if (!grid || !targetPrefab) return;
 
         ClearTarget();
-        // A안: range 타일이 존재하면 spawn 대신 승격 (겹쳐서 진해짐 방지)
         ClearTargetOverlay();
         ClearTarget();
+
         var refSr = targetPrefab.GetComponentInChildren<SpriteRenderer>();
         if (refSr == null) return;
 
@@ -130,12 +128,11 @@ public class TileHighlighter : MonoBehaviour
                 {
                     if (!rangeBackup.ContainsKey(p)) rangeBackup[p] = (rsr.sprite, rsr.color);
                     rsr.sprite = refSr.sprite;
-                    rsr.color  = refSr.color;
+                    rsr.color = refSr.color;
                     targetOverlaySet.Add(p);
                     continue;
                 }
             }
-            // range가 없는 곳은 기존처럼 별도 target 타일 생성
             SpawnTile(p, targetPrefab, targetActive);
         }
     }
@@ -154,9 +151,6 @@ public class TileHighlighter : MonoBehaviour
         dict[gridPos] = go;
     }
 
-    // -------------------------
-    // Hover overlays (no extra spawn)
-    // -------------------------
     public void ClearPath()
     {
         foreach (var p in pathOverlaySet)
@@ -167,7 +161,7 @@ public class TileHighlighter : MonoBehaviour
                 if (sr != null && moveBackup.TryGetValue(p, out var bak))
                 {
                     sr.sprite = bak.sprite;
-                    sr.color  = bak.color;
+                    sr.color = bak.color;
                 }
             }
         }
@@ -185,7 +179,7 @@ public class TileHighlighter : MonoBehaviour
                 if (sr != null && rangeBackup.TryGetValue(p, out var bak))
                 {
                     sr.sprite = bak.sprite;
-                    sr.color  = bak.color;
+                    sr.color = bak.color;
                 }
             }
         }
@@ -193,6 +187,7 @@ public class TileHighlighter : MonoBehaviour
         rangeBackup.Clear();
     }
 
+    // hover path: move 타일 승격
     public void ShowPathTiles(IEnumerable<Vector2Int> tiles)
     {
         if (!grid) grid = GridManager.I;
@@ -205,15 +200,30 @@ public class TileHighlighter : MonoBehaviour
         foreach (var p in tiles)
         {
             if (!grid.InBounds(p)) continue;
-            if (!moveActive.TryGetValue(p, out var go) || !go) continue; // move 타일이 깔린 곳만 승격
+            if (!moveActive.TryGetValue(p, out var go) || !go) continue;
 
             var sr = go.GetComponentInChildren<SpriteRenderer>();
             if (sr == null) continue;
 
             if (!moveBackup.ContainsKey(p)) moveBackup[p] = (sr.sprite, sr.color);
             sr.sprite = refSr.sprite;
-            sr.color  = refSr.color;
+            sr.color = refSr.color;
             pathOverlaySet.Add(p);
+        }
+    }
+
+    // planned/ghost path: 별도 spawn
+    public void ShowPlannedPathTiles(IEnumerable<Vector2Int> tiles)
+    {
+        ClearPlannedPath();
+
+        if (!grid) grid = GridManager.I;
+        if (!grid || !pathTilePrefab || tiles == null) return;
+
+        foreach (var p in tiles)
+        {
+            if (!grid.InBounds(p)) continue;
+            SpawnTile(p, pathTilePrefab, plannedPathActive);
         }
     }
 
@@ -239,4 +249,58 @@ public class TileHighlighter : MonoBehaviour
         invalidActive[tile] = go;
     }
 
+    public void ShowHoverHazardPathTiles(IEnumerable<Vector2Int> tiles)
+    {
+        ClearHoverHazardPath();
+        if (tiles == null) return;
+
+        foreach (var p in tiles)
+            SpawnHazardPathTile(p, hoverHazardPathPool);
+    }
+
+    public void ShowPlannedHazardPathTiles(IEnumerable<Vector2Int> tiles)
+    {
+        ClearPlannedHazardPath();
+        if (tiles == null) return;
+
+        foreach (var p in tiles)
+            SpawnHazardPathTile(p, plannedHazardPathPool);
+    }
+
+    public void ClearHoverHazardPath()
+    {
+        ClearPool(hoverHazardPathPool);
+    }
+
+    public void ClearPlannedHazardPath()
+    {
+        ClearPool(plannedHazardPathPool);
+    }
+
+    public void ClearHazardPath()
+    {
+        ClearHoverHazardPath();
+        ClearPlannedHazardPath();
+    }
+
+    private void ClearPool(List<GameObject> pool)
+    {
+        for (int i = 0; i < pool.Count; i++)
+        {
+            if (pool[i] != null)
+                Destroy(pool[i]);
+        }
+        pool.Clear();
+    }
+
+    private void SpawnHazardPathTile(Vector2Int gridPos, List<GameObject> pool)
+    {
+        if (hazardPathPrefab == null) return;
+        if (!grid) grid = GridManager.I;
+        if (!grid || !grid.InBounds(gridPos)) return;
+
+        Vector3 world = grid.GridToWorld(gridPos);
+        var go = Instantiate(hazardPathPrefab, world, Quaternion.identity, transform);
+        pool.Add(go);
+    }
 }

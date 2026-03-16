@@ -22,8 +22,13 @@ public static class AIPlanner
     const float FRIENDLY_FIRE_MULTIPLIER = 1.15f;
     const float HAZARD_BURN_BASE_PENALTY = 5.0f;
     const float HAZARD_POISON_BASE_PENALTY = 6.5f;
-    const float HAZARD_EXPLOSION_BASE_PENALTY = 9.0f;
-    const float SELF_HAZARD_EXTRA_PENALTY = 2.5f;
+    const float HAZARD_EXPLOSION_BASE_PENALTY = 10.0f;
+
+    const float HAZARD_POWER_BONUS = 1.5f;
+    const float HAZARD_EXPLOSION_POWER_MULTIPLIER = 1.5f;
+
+    const float LOW_HP_HAZARD_MULTIPLIER = 1.2f;
+    const float CRITICAL_HP_HAZARD_MULTIPLIER = 1.5f;
 
     const float STATUS_POISON_MULTIPLIER = 0.90f;
     const float STATUS_STUN_VALUE = 9.5f;
@@ -245,6 +250,8 @@ public static class AIPlanner
             int nearest = NearestDistanceToAny(tile, enemies);
             float threat = EstimateThreatCount(tile, enemies, opponentSkillPool, grid);
             float hazardPenalty = GetPathHazardPenalty(actor, grid, tile, cameFrom);
+            if (PathContainsLethalExplosion(actor, grid, tile, cameFrom))
+                hazardPenalty += 1000f;
             bool canAttack = CanAnySkillHitFromTile(actor, tile, usableSkills, allies, enemies, grid);
 
             float score;
@@ -304,6 +311,8 @@ public static class AIPlanner
         float threat = EstimateThreatCount(fromTile, enemies, opponentSkillPool, grid);
         float risk = threat * profile.weightThreat;
         float hazardPenalty = GetPathHazardPenalty(actor, grid, fromTile, cameFrom);
+        if (PathContainsLethalExplosion(actor, grid, fromTile, cameFrom))
+            hazardPenalty += 1000f;
         float apPenalty = skill.costAP * COST_PENALTY_PER_AP;
 
         switch (skill.targetMode)
@@ -738,42 +747,6 @@ public static class AIPlanner
         return count;
     }
 
-    static float GetHazardPenalty(GridManager grid, Vector2Int tile)
-    {
-        if (grid == null) return 0f;
-
-        var tv = grid.GetTileView(tile);
-        if (tv == null || tv.tileData == null) return 0f;
-
-        var td = tv.tileData;
-        float powerBonus = Mathf.Max(0, td.hazardPower - 1) * 1.5f;
-
-        switch (td.hazardType)
-        {
-            case HazardType.Burn:
-                return HAZARD_BURN_BASE_PENALTY + powerBonus;
-
-            case HazardType.Poison:
-                return HAZARD_POISON_BASE_PENALTY + powerBonus;
-
-            case HazardType.Explosion:
-                return HAZARD_EXPLOSION_BASE_PENALTY + powerBonus;
-
-            default:
-                return 0f;
-        }
-    }
-
-    static bool TileHasHazard(GridManager grid, Vector2Int tile)
-    {
-        if (grid == null) return false;
-
-        var tv = grid.GetTileView(tile);
-        if (tv == null || tv.tileData == null) return false;
-
-        return tv.tileData.hazardType != HazardType.None;
-    }
-
     // ===== AOE center candidates =====
     static List<Vector2Int> BuildAOECenterCandidates(Vector2Int fromTile, List<Unit> enemies, SkillData skill, GridManager grid)
     {
@@ -1059,6 +1032,67 @@ public static class AIPlanner
         }
     }
 
+        static float GetActorHazardHpMultiplier(Unit actor)
+    {
+        if (actor == null || actor.maxHP <= 0)
+            return 1f;
+
+        float hpRatio = (float)actor.currentHP / actor.maxHP;
+
+        if (hpRatio <= 0.35f)
+            return CRITICAL_HP_HAZARD_MULTIPLIER;
+
+        if (hpRatio <= 0.60f)
+            return LOW_HP_HAZARD_MULTIPLIER;
+
+        return 1f;
+    }
+
+    static float GetSingleTileHazardPenalty(Unit actor, GridManager grid, Vector2Int tile)
+    {
+        if (actor == null || grid == null)
+            return 0f;
+
+        var tv = grid.GetTileView(tile);
+        if (tv == null || tv.tileData == null)
+            return 0f;
+
+        var td = tv.tileData;
+        if (td.hazardTrigger != HazardTriggerType.OnEnter)
+            return 0f;
+
+        float hpFactor = GetActorHazardHpMultiplier(actor);
+        float powerBonus = Mathf.Max(0, td.hazardPower - 1) * HAZARD_POWER_BONUS;
+
+        switch (td.hazardType)
+        {
+            case HazardType.Burn:
+                return (HAZARD_BURN_BASE_PENALTY + powerBonus) * hpFactor;
+
+            case HazardType.Poison:
+                return (HAZARD_POISON_BASE_PENALTY + powerBonus) * hpFactor;
+
+            case HazardType.Explosion:
+                return (HAZARD_EXPLOSION_BASE_PENALTY + (powerBonus * HAZARD_EXPLOSION_POWER_MULTIPLIER)) * hpFactor;
+
+            default:
+                return 0f;
+        }
+    }
+
+    static bool TileHasHazard(GridManager grid, Vector2Int tile)
+    {
+        if (grid == null)
+            return false;
+
+        var tv = grid.GetTileView(tile);
+        if (tv == null || tv.tileData == null)
+            return false;
+
+        return tv.tileData.hazardType != HazardType.None
+            && tv.tileData.hazardTrigger == HazardTriggerType.OnEnter;
+    }
+
     static float GetPathHazardPenalty(
         Unit actor,
         GridManager grid,
@@ -1080,16 +1114,38 @@ public static class AIPlanner
 
         foreach (var step in path)
         {
-            var tv = grid.GetTileView(step);
-            if (tv == null || tv.tileData == null)
-                continue;
-
-            if (tv.tileData.hazardTrigger != HazardTriggerType.OnEnter)
-                continue;
-
-            sum += GetSingleTileHazardPenalty(grid, step);
+            sum += GetSingleTileHazardPenalty(actor, grid, step);
         }
 
         return sum;
+    }
+
+        static bool PathContainsLethalExplosion(
+        Unit actor,
+        GridManager grid,
+        Vector2Int destination,
+        Dictionary<Vector2Int, Vector2Int> cameFrom
+    )
+    {
+        if (actor == null || grid == null)
+            return false;
+
+        var path = grid.ReconstructPath(actor.GridPos, destination, cameFrom);
+        if (path == null || path.Count == 0)
+            return false;
+
+        foreach (var step in path)
+        {
+            var td = grid.GetTileData(step);
+            if (td == null) continue;
+
+            if (td.hazardTrigger != HazardTriggerType.OnEnter) continue;
+            if (td.hazardType != HazardType.Explosion) continue;
+
+            if (actor.currentHP <= td.hazardPower)
+                return true;
+        }
+
+        return false;
     }
 }

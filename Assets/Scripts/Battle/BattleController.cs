@@ -1043,18 +1043,18 @@ public class BattleController : MonoBehaviour
         if (!reachableMoveCache.ContainsKey(gridPos))
         {
             tileHighlighter.ClearPath();
+            tileHighlighter.ClearHoverHazardPath();
             hoverMoveTile = null;
             return;
         }
 
-        // 본인 타일이면 프리뷰 끔
         if (gridPos == activeUnit.GridPos)
         {
             tileHighlighter.ClearPath();
+            tileHighlighter.ClearHoverHazardPath();
             hoverMoveTile = null;
             return;
         }
-
         if (hoverMoveTile.HasValue && hoverMoveTile.Value == gridPos) return;
         hoverMoveTile = gridPos;
 
@@ -1071,6 +1071,7 @@ public class BattleController : MonoBehaviour
             if (!reachableMoveCache.ContainsKey(gridPos))
             {
                 tileHighlighter.ClearPath();
+                tileHighlighter.ClearHoverHazardPath();
                 hoverMoveTile = null;
                 return;
             }
@@ -1081,11 +1082,12 @@ public class BattleController : MonoBehaviour
         if (path == null || path.Count == 0)
         {
             tileHighlighter.ClearPath();
+            tileHighlighter.ClearHoverHazardPath();
             hoverMoveTile = null;
             return;
         }
 
-        tileHighlighter.ShowPathTiles(path);
+        ShowHoverPathWithHazardPreview(path);
     }
 
     public void ClearHoverMovePathPreview()
@@ -1093,9 +1095,9 @@ public class BattleController : MonoBehaviour
         hoverMoveTile = null;
         if (tileHighlighter != null)
         {
-            // A안: range 타일 승격(overlay) 원복 + 별도 target 타일 제거
             tileHighlighter.ClearTargetOverlay();
             tileHighlighter.ClearPath();
+            tileHighlighter.ClearHoverHazardPath();
         }
     }
 
@@ -1137,8 +1139,12 @@ public class BattleController : MonoBehaviour
                         var body = new List<Vector2Int>(path);
                         body.RemoveAt(body.Count - 1);
 
-                        if (body.Count > 0)
-                            tileHighlighter.ShowPathTiles(body);
+                        ShowPlannedPathWithHazardPreview(body);
+                    }
+                    else
+                    {
+                        tileHighlighter.ClearPlannedPath();
+                        tileHighlighter.ClearPlannedHazardPath();
                     }
 
                     tileHighlighter.ShowGhostTile(PlannedMoveTile.Value);
@@ -1162,8 +1168,12 @@ public class BattleController : MonoBehaviour
                     var body = new List<Vector2Int>(path);
                     body.RemoveAt(body.Count - 1);
 
-                    if (body.Count > 0)
-                        tileHighlighter.ShowPathTiles(body);
+                    ShowPlannedPathWithHazardPreview(body);
+                }
+                else
+                {
+                    tileHighlighter.ClearPlannedPath();
+                    tileHighlighter.ClearPlannedHazardPath();
                 }
 
                 tileHighlighter.ShowGhostTile(PlannedMoveTile.Value);
@@ -1241,7 +1251,7 @@ public class BattleController : MonoBehaviour
                 OnActionComplete();
                 yield break;
             }
-            
+
             var action = executeQueue[i];
             if (action == null) continue;
 
@@ -1791,5 +1801,65 @@ public class BattleController : MonoBehaviour
         }
 
         return result;
+    }
+
+    private List<Vector2Int> ExtractHazardPathTiles(List<Vector2Int> path)
+    {
+        var result = new List<Vector2Int>();
+        if (path == null || grid == null) return result;
+
+        for (int i = 0; i < path.Count; i++)
+        {
+            var step = path[i];
+            var td = grid.GetTileData(step);
+            if (td == null) continue;
+
+            if (td.hazardType == HazardType.None) continue;
+            if (td.hazardTrigger != HazardTriggerType.OnEnter) continue;
+
+            result.Add(step);
+        }
+
+        return result;
+    }
+
+    private void ShowHoverPathWithHazardPreview(List<Vector2Int> path)
+    {
+        if (tileHighlighter == null) return;
+
+        if (path == null || path.Count == 0)
+        {
+            tileHighlighter.ClearPath();
+            tileHighlighter.ClearHoverHazardPath();
+            return;
+        }
+
+        tileHighlighter.ShowPathTiles(path);
+
+        var hazardTiles = ExtractHazardPathTiles(path);
+        if (hazardTiles.Count > 0)
+            tileHighlighter.ShowHoverHazardPathTiles(hazardTiles);
+        else
+            tileHighlighter.ClearHoverHazardPath();
+    }
+
+    private void ShowPlannedPathWithHazardPreview(List<Vector2Int> pathBody)
+    {
+        if (tileHighlighter == null) return;
+
+        if (pathBody == null || pathBody.Count == 0)
+        {
+            tileHighlighter.ClearPlannedPath();
+            tileHighlighter.ClearPlannedHazardPath();
+            return;
+        }
+
+        tileHighlighter.ShowPlannedPathTiles(pathBody);
+
+        var hazardTiles = ExtractHazardPathTiles(pathBody);
+        if (hazardTiles.Count > 0)
+            tileHighlighter.ShowPlannedHazardPathTiles(hazardTiles);
+        else
+            tileHighlighter.ClearPlannedHazardPath();
     }
 }
