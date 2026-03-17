@@ -119,11 +119,20 @@ public static class CombatResolver
         if (skill == null || skill.effects == null)
             return;
 
+        var ordered = new List<SkillEffect>(skill.effects.Length);
+
         for (int i = 0; i < skill.effects.Length; i++)
         {
             var effect = skill.effects[i];
-            if (effect == null) continue;
-            effect.Apply(attacker, defender);
+            if (effect != null)
+                ordered.Add(effect);
+        }
+
+        ordered.Sort((a, b) => a.OrderPriority.CompareTo(b.OrderPriority));
+
+        for (int i = 0; i < ordered.Count; i++)
+        {
+            ordered[i].Apply(attacker, defender);
         }
     }
 

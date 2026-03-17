@@ -1706,13 +1706,7 @@ public class BattleController : MonoBehaviour
         {
             var e = skill.effects[i];
             if (e == null) continue;
-
-            if (e is DealDamageEffect) return true;
-            if (e is BurnApplyEffect) return true;
-            if (e is PoisonApplyEffect) return true;
-            if (e is StunApplyEffect) return true;
-            if (e is FreezeApplyEffect) return true;
-            if (e is SlowApplyEffect) return true;
+            if (e.IsOffensive) return true;
         }
 
         return false;

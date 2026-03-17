@@ -575,22 +575,66 @@ public static class AIPlanner
         {
             if (e == null) continue;
 
-            if (e is DealDamageEffect dd) dmg += dd.damage;
-            if (e is HealEffect he) heal += he.healAmount;
-            if (e is BurnApplyEffect ba) burn += ba.damagePerTurn * ba.durationTurns;
-            if (e is PoisonApplyEffect pa) poison += pa.damagePerTurn * pa.durationTurns;
-            if (e is StunApplyEffect sa) stun += STATUS_STUN_VALUE * Mathf.Max(1, sa.durationTurns);
-            if (e is FreezeApplyEffect fa) freeze += STATUS_FREEZE_VALUE * Mathf.Max(1, fa.durationTurns);
-            if (e is SlowApplyEffect sla) slow += STATUS_SLOW_PER_TILE * Mathf.Max(1, sla.movePenalty) * Mathf.Max(1, sla.durationTurns);
-            if (e is CounterApplyEffect ca) counter += STATUS_COUNTER_VALUE * Mathf.Max(1, ca.durationTurns);
-            if (e is InvincibleApplyEffect ia) invincible += STATUS_INVINCIBLE_VALUE * Mathf.Max(1, ia.durationTurns);
-            if (e is ShieldApplyEffect sha) shield += sha.shieldAmount * Mathf.Max(1, sha.durationTurns) * STATUS_SHIELD_MULTIPLIER;
-        }
+            // 1차: direct effect는 기존 유지
+            if (e is DealDamageEffect dd)
+            {
+                dmg += dd.damage;
+                continue;
+            }
 
-        float value = 0f;
+            if (e is HealEffect he)
+            {
+                heal += he.healAmount;
+                continue;
+            }
+
+            // 1차: status apply는 공통 베이스로 처리
+            if (e is ApplyStatusEffectBase se)
+            {
+                int power = Mathf.Max(1, se.Power);
+                int turns = Mathf.Max(1, se.DurationTurns);
+
+                switch (se.StatusId)
+                {
+                    case StatusId.Burn:
+                        burn += power * turns;
+                        break;
+
+                    case StatusId.Poison:
+                        poison += power * turns;
+                        break;
+
+                    case StatusId.Stun:
+                        stun += STATUS_STUN_VALUE * turns;
+                        break;
+
+                    case StatusId.Freeze:
+                        freeze += STATUS_FREEZE_VALUE * turns;
+                        break;
+
+                    case StatusId.Slow:
+                        slow += STATUS_SLOW_PER_TILE * power * turns;
+                        break;
+
+                    case StatusId.Counter:
+                        counter += STATUS_COUNTER_VALUE * turns;
+                        break;
+
+                    case StatusId.Invincible:
+                        invincible += STATUS_INVINCIBLE_VALUE * turns;
+                        break;
+
+                    case StatusId.Shield:
+                        shield += power * turns * STATUS_SHIELD_MULTIPLIER;
+                        break;
+                }
+            }
+        }
 
         if (target == null)
             return 0f;
+
+        float value = 0f;
 
         if (targetIsEnemy)
         {
@@ -665,17 +709,19 @@ public static class AIPlanner
         {
             if (e == null) continue;
 
-            if (e is HealEffect he) helpful += he.healAmount;
-            if (e is ShieldApplyEffect sha) helpful += sha.shieldAmount;
-            if (e is InvincibleApplyEffect) helpful += 8f;
-            if (e is CounterApplyEffect) helpful += 4f;
+            if (e is HealEffect he)
+                helpful += he.healAmount;
 
-            if (e is DealDamageEffect dd) harmful += dd.damage;
-            if (e is BurnApplyEffect ba) harmful += ba.damagePerTurn * ba.durationTurns;
-            if (e is PoisonApplyEffect pa) harmful += pa.damagePerTurn * pa.durationTurns;
-            if (e is StunApplyEffect) harmful += 8f;
-            if (e is FreezeApplyEffect) harmful += 10f;
-            if (e is SlowApplyEffect sla) harmful += sla.movePenalty * sla.durationTurns * 2f;
+            if (e is DealDamageEffect dd)
+                harmful += dd.damage;
+
+            if (e is ApplyStatusEffectBase se)
+            {
+                float baseValue = Mathf.Max(1, se.Power) * Mathf.Max(1, se.DurationTurns);
+
+                if (se.IsHelpful) helpful += baseValue;
+                if (se.IsOffensive) harmful += baseValue;
+            }
         }
 
         return helpful > harmful;

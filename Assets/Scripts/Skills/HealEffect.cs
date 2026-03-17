@@ -1,15 +1,18 @@
 using UnityEngine;
 
-[CreateAssetMenu(menuName = "Battle/SkillEffect/Heal", fileName = "HealEffect_")]
+[CreateAssetMenu(menuName = "Skills/Effects/Heal")]
 public class HealEffect : SkillEffect
 {
-    [Min(0)]
-    public int healAmount = 10;
+    public int healAmount = 5;
 
-    public override void Apply(Unit attacker, Unit target)
+    public override SkillEffectCategory Category => SkillEffectCategory.Heal;
+    public override bool IsOffensive => false;
+    public override bool IsHelpful => true;
+    public override int OrderPriority => 10;
+
+    public override void Apply(Unit attacker, Unit defender)
     {
-        if (target == null || target.IsDead) return;
-
-        target.Heal(healAmount);
+        if (defender == null || defender.IsDead) return;
+        defender.Heal(healAmount);
     }
 }
