@@ -200,7 +200,8 @@ public class BattleController : MonoBehaviour
                 var s = (pool != null && idx < pool.Length) ? pool[idx] : null;
                 label.text = s != null ? s.skillName : "-";
             }
-
+            // 차후 tooltip/hud 설명용
+            // string summary = s != null ? SkillEffectFormatter.BuildSkillSummary(s) : "";
             skillButtons[i].interactable = (pool != null && idx < pool.Length && pool[idx] != null);
         }
     }
@@ -1699,17 +1700,7 @@ public class BattleController : MonoBehaviour
 
     private bool IsOffensiveSkill(SkillData skill)
     {
-        if (skill == null || skill.effects == null)
-            return false;
-
-        for (int i = 0; i < skill.effects.Length; i++)
-        {
-            var e = skill.effects[i];
-            if (e == null) continue;
-            if (e.IsOffensive) return true;
-        }
-
-        return false;
+        return SkillMetaUtility.ContainsOffensiveEffect(skill);
     }
 
     private void ShowHoverPathWithHazardPreview(List<Vector2Int> path)

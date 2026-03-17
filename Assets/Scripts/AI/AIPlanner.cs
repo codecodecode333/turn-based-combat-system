@@ -504,7 +504,7 @@ public static class AIPlanner
             }
             else if (isAlly)
             {
-                if (IsMostlyHelpfulSkill(skill))
+                if (SkillMetaUtility.IsMostlyHelpfulSkill(skill))
                     sum += v;
                 else
                     sum -= Mathf.Abs(v) * FRIENDLY_FIRE_MULTIPLIER;
@@ -695,36 +695,6 @@ public static class AIPlanner
     static float EstimateSkillValue(SkillData skill, Unit target, AIProfile profile)
     {
         return EstimateSkillValueForRelation(skill, target, true, profile);
-    }
-
-    static bool IsMostlyHelpfulSkill(SkillData skill)
-    {
-        if (skill == null || skill.effects == null)
-            return false;
-
-        float helpful = 0f;
-        float harmful = 0f;
-
-        foreach (var e in skill.effects)
-        {
-            if (e == null) continue;
-
-            if (e is HealEffect he)
-                helpful += he.healAmount;
-
-            if (e is DealDamageEffect dd)
-                harmful += dd.damage;
-
-            if (e is ApplyStatusEffectBase se)
-            {
-                float baseValue = Mathf.Max(1, se.Power) * Mathf.Max(1, se.DurationTurns);
-
-                if (se.IsHelpful) helpful += baseValue;
-                if (se.IsOffensive) harmful += baseValue;
-            }
-        }
-
-        return helpful > harmful;
     }
 
     static float EvaluateStatusBonusVsTarget(Unit target, StatusId id, float rawValue)
