@@ -1025,6 +1025,7 @@ MonoBehaviour:
   targetPrefab: {fileID: 9169441954277651116, guid: 3e5a3b31fd7a76645914ee3f8c36bc2e, type: 3}
   ghostTilePrefab: {fileID: 8474163127165659146, guid: 426b427ace37d044eb540f229e0c8ad2, type: 3}
   invalidTilePrefab: {fileID: 6754760730953624394, guid: 345dbe42f9a5c2140891b081a293613d, type: 3}
+  hazardPathPrefab: {fileID: 4094983556775124581, guid: a1a24234cc2bb7643ab8fd78c75d7937, type: 3}
 --- !u!4 &1114685926
 Transform:
   m_ObjectHideFlags: 0

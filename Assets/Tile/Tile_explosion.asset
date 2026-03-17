@@ -16,6 +16,7 @@ MonoBehaviour:
   passable: 1
   blocksLOS: 0
   heightLevel: 0
-  hazardType: 0
-  hazardPower: 1
+  hazardType: 3
+  hazardTrigger: 1
+  hazardPower: 3
   hazardDuration: 1

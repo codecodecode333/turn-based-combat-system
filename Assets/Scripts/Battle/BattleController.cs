@@ -45,6 +45,20 @@ public class BattleController : MonoBehaviour
     List<Unit> GetCasterAllies(Unit caster) => IsAlly(caster) ? allies : enemies;
     List<Unit> GetCasterEnemies(Unit caster) => IsAlly(caster) ? enemies : allies;
 
+    private CombatResolver.Context BuildCombatContext(Unit attacker)
+    {
+        return new CombatResolver.Context
+        {
+            grid = grid,
+            allies = GetCasterAllies(attacker),
+            enemies = GetCasterEnemies(attacker),
+            getSkillPoolFor = GetSkillPoolFor,
+            isOffensiveSkill = IsOffensiveSkill,
+            runCounterAttack = TryRunCounterAttack,
+            isCounterAttackInProgress = isCounterAttackInProgress
+        };
+    }
+
     public GridManager grid;
     private readonly List<Unit> previewTargetUnits = new List<Unit>(16);
 
@@ -61,12 +75,6 @@ public class BattleController : MonoBehaviour
         PlannedSkill.targetMode == SkillTargetMode.ClickTileAOE &&
         PlannedClickedTile.HasValue;
 
-    private struct HazardResolveResult
-    {
-        public bool triggered;
-        public bool stopMovement;
-        public bool consumedTile;
-    }
     // =========================
     // Action Queue
     // =========================
@@ -400,20 +408,21 @@ public class BattleController : MonoBehaviour
     private void ApplyTileHazardOnTurnStart(Unit unit)
     {
         if (unit == null || unit.IsDead) return;
-        ResolveHazard(unit, unit.GridPos, HazardTriggerType.OnTurnStart);
+        HazardSystem.Resolve(unit, unit.GridPos, HazardTriggerType.OnTurnStart, grid);
     }
 
     private void ApplyTileHazardOnTurnEnd(Unit unit)
     {
         if (unit == null || unit.IsDead) return;
-        ResolveHazard(unit, unit.GridPos, HazardTriggerType.OnTurnEnd);
+        HazardSystem.Resolve(unit, unit.GridPos, HazardTriggerType.OnTurnEnd, grid);
     }
 
     private void ApplyTileHazardOnStepEntered(Unit unit, Vector2Int step)
     {
         if (unit == null || unit.IsDead) return;
-        ResolveHazard(unit, step, HazardTriggerType.OnEnter);
+        HazardSystem.Resolve(unit, step, HazardTriggerType.OnEnter, grid);
     }
+
     void EndBattle(string msg)
     {
         battleEnded = true;
@@ -495,67 +504,52 @@ public class BattleController : MonoBehaviour
             yield break;
         }
 
-        if (!attacker.CanAct())
-        {
-            onComplete?.Invoke();
-            yield break;
-        }
+        var ctx = BuildCombatContext(attacker);
 
-        var targets = CombatTargetResolver.ResolveTargets(
+        var resolved = CombatResolver.ResolveForExecution(
             skill,
             attacker,
-            GetCasterAllies(attacker),
-            GetCasterEnemies(attacker),
-            grid,
+            ctx,
             clickedTile,
-            clickedUnit
+            clickedUnit,
+            spendAP
         );
-        if (targets.Count == 0)
+
+        if (!resolved.success)
         {
             onComplete?.Invoke();
             yield break;
-        }
-
-        if (spendAP)
-        {
-            if (!attacker.SpendAP(skill.costAP))
-            {
-                onComplete?.Invoke();
-                yield break;
-            }
         }
 
         bool hitDone = false;
         bool endDone = false;
+        bool effectsApplied = false;
 
-        IEnumerator ApplyEffectsAndCounters()
+        IEnumerator ApplyOnce()
         {
-            for (int i = 0; i < targets.Count; i++)
-            {
-                var t = targets[i];
-                if (t == null || t.IsDead)
-                    continue;
+            if (effectsApplied)
+                yield break;
 
-                ApplySkillEffects(skill, attacker, t);
-
-                // 단일 공격 Counter 체크
-                if (IsSingleTargetCounterable(skill, targets, t))
-                {
-                    yield return TryRunCounterAttack(t, attacker);
-                }
-            }
+            effectsApplied = true;
+            yield return CombatResolver.ApplyResolvedEffectsAndCounters(
+                skill,
+                attacker,
+                resolved,
+                BuildCombatContext(attacker)
+            );
         }
 
         void OnHit()
         {
             if (hitDone) return;
             hitDone = true;
-            foreach (var t in targets)
-                if (t != null && !t.IsDead)
-                    ApplySkillEffects(skill, attacker, t);
+            StartCoroutine(ApplyOnce());
         }
 
-        void OnEnd() { endDone = true; }
+        void OnEnd()
+        {
+            endDone = true;
+        }
 
         attacker.AttackHitEvent += OnHit;
         attacker.AttackEndEvent += OnEnd;
@@ -567,7 +561,7 @@ public class BattleController : MonoBehaviour
 
         if (skill.timing == SkillTiming.Immediate)
         {
-            yield return ApplyEffectsAndCounters();
+            yield return ApplyOnce();
             hitDone = true;
         }
         else if (skill.timing == SkillTiming.OnAttackHit)
@@ -577,6 +571,9 @@ public class BattleController : MonoBehaviour
                 t += Time.deltaTime;
                 yield return null;
             }
+
+            if (!effectsApplied)
+                yield return ApplyOnce();
         }
         else if (skill.timing == SkillTiming.OnAttackEnd)
         {
@@ -586,9 +583,9 @@ public class BattleController : MonoBehaviour
                 yield return null;
             }
 
-            if (!hitDone)
+            if (!effectsApplied)
             {
-                yield return ApplyEffectsAndCounters();
+                yield return ApplyOnce();
                 hitDone = true;
             }
         }
@@ -604,13 +601,6 @@ public class BattleController : MonoBehaviour
         attacker.AttackEndEvent -= OnEnd;
 
         onComplete?.Invoke();
-
-    }
-
-    void ApplySkillEffects(SkillData skill, Unit attacker, Unit defender)
-    {
-        foreach (var effect in skill.effects)
-            effect.Apply(attacker, defender);
     }
 
     void SetSkillButtonsInteractable(bool v)
@@ -1644,41 +1634,6 @@ public class BattleController : MonoBehaviour
             RebuildReachableMoveCache();
     }
 
-    private bool IsSingleTargetCounterable(SkillData skill, List<Unit> resolvedTargets, Unit defender)
-    {
-        if (skill == null || defender == null || resolvedTargets == null)
-            return false;
-
-        if (isCounterAttackInProgress)
-            return false;
-
-        if (defender.IsDead)
-            return false;
-
-        if (!defender.CanAct())
-            return false;
-
-        if (!defender.HasCounterReady())
-            return false;
-
-        if (!IsOffensiveSkill(skill))
-            return false;
-
-        // AOE는 반격 불가
-        if (skill.targetMode == SkillTargetMode.ClickTileAOE)
-            return false;
-
-        // 단일 공격만 허용
-        // ResolveTargets 결과가 정확히 1명이고 그 1명이 defender여야 함
-        if (resolvedTargets.Count != 1)
-            return false;
-
-        if (resolvedTargets[0] != defender)
-            return false;
-
-        return true;
-    }
-
     private SkillData ChooseCounterSkill(Unit counterUnit, Unit attacker)
     {
         if (counterUnit == null || attacker == null) return null;
@@ -1737,6 +1692,7 @@ public class BattleController : MonoBehaviour
             originalAttacker,
             false
         );
+
         defender.RemoveStatus(StatusId.Counter);
         isCounterAttackInProgress = false;
     }
@@ -1762,67 +1718,6 @@ public class BattleController : MonoBehaviour
         return false;
     }
 
-    private HazardResolveResult ResolveHazard(Unit unit, Vector2Int tilePos, HazardTriggerType trigger)
-    {
-        var result = new HazardResolveResult();
-
-        if (unit == null || unit.IsDead || grid == null)
-            return result;
-
-        var tile = grid.GetTileView(tilePos);
-        if (tile == null || tile.tileData == null)
-            return result;
-
-        if (tile.HazardType == HazardType.None)
-            return result;
-
-        if (tile.HazardTrigger != trigger)
-            return result;
-
-        int power = Mathf.Max(1, tile.HazardPower);
-        int duration = Mathf.Max(1, tile.HazardDuration);
-
-        switch (tile.HazardType)
-        {
-            case HazardType.Burn:
-                unit.AddOrRefreshStatus(new BurnStatus(power, duration, unit));
-                result.triggered = true;
-                break;
-
-            case HazardType.Poison:
-                unit.AddOrRefreshStatus(new PoisonStatus(power, duration, unit));
-                result.triggered = true;
-                break;
-
-            case HazardType.Explosion:
-                unit.TakeDamage(power);
-                result.triggered = true;
-                break;
-        }
-
-        return result;
-    }
-
-    private List<Vector2Int> ExtractHazardPathTiles(List<Vector2Int> path)
-    {
-        var result = new List<Vector2Int>();
-        if (path == null || grid == null) return result;
-
-        for (int i = 0; i < path.Count; i++)
-        {
-            var step = path[i];
-            var td = grid.GetTileData(step);
-            if (td == null) continue;
-
-            if (td.hazardType == HazardType.None) continue;
-            if (td.hazardTrigger != HazardTriggerType.OnEnter) continue;
-
-            result.Add(step);
-        }
-
-        return result;
-    }
-
     private void ShowHoverPathWithHazardPreview(List<Vector2Int> path)
     {
         if (tileHighlighter == null) return;
@@ -1836,7 +1731,7 @@ public class BattleController : MonoBehaviour
 
         tileHighlighter.ShowPathTiles(path);
 
-        var hazardTiles = ExtractHazardPathTiles(path);
+        var hazardTiles = HazardUtility.ExtractHazardPathTiles(path, grid, HazardTriggerType.OnEnter);
         if (hazardTiles.Count > 0)
             tileHighlighter.ShowHoverHazardPathTiles(hazardTiles);
         else
@@ -1856,7 +1751,7 @@ public class BattleController : MonoBehaviour
 
         tileHighlighter.ShowPlannedPathTiles(pathBody);
 
-        var hazardTiles = ExtractHazardPathTiles(pathBody);
+        var hazardTiles = HazardUtility.ExtractHazardPathTiles(pathBody, grid, HazardTriggerType.OnEnter);
         if (hazardTiles.Count > 0)
             tileHighlighter.ShowPlannedHazardPathTiles(hazardTiles);
         else

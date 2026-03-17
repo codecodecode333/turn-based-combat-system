@@ -12,7 +12,11 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: e1770670e8a72d74a8e87bc1bf236efb, type: 3}
   m_Name: Tile_Fire
   m_EditorClassIdentifier: Assembly-CSharp::TileData
+  tileType: 0
   passable: 1
   blocksLOS: 0
   heightLevel: 0
-  hazardType: Fire
+  hazardType: 1
+  hazardTrigger: 1
+  hazardPower: 5
+  hazardDuration: 1
