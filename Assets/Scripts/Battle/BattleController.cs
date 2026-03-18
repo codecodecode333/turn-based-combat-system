@@ -32,6 +32,28 @@ public class BattleController : MonoBehaviour
     public Button[] skillButtons;      // size 3
     public TMP_Text turnText;
 
+    [Header("Preview Actor")]
+    public bool usePreviewActorGhost = true;
+    [Range(0f, 1f)] public float sourceActorPreviewAlpha = 0.4f;
+    public Vector3 previewActorOffset = new Vector3(0f, 0f, -0.35f);
+
+    GameObject previewActorRoot;
+    readonly List<SpriteRenderer> activeUnitSpriteCache = new List<SpriteRenderer>(8);
+    readonly List<Color> activeUnitOriginalColors = new List<Color>(8);
+    readonly List<SpriteRenderer> previewActorSpriteCache = new List<SpriteRenderer>(8);
+
+    Unit previewActorSourceUnit;
+    bool previewActorInitialized = false;
+
+    [Header("Preview Actor Visual Root")]
+    public string previewVisualRootName = "UnitRoot"; // 네 프로젝트 시각 루트 이름에 맞게 수정
+
+    Transform previewActorSourceVisualRoot;
+    Animator previewActorAnimator;
+    readonly List<Behaviour> previewDisabledBehaviours = new List<Behaviour>();
+    readonly List<Collider2D> previewDisabledColliders = new List<Collider2D>();
+    readonly List<Canvas> previewDisabledCanvas = new List<Canvas>();
+
     // ===== Turn Queue =====
     List<Unit> turnOrder = new List<Unit>();
     int turnIndex = 0;
@@ -306,6 +328,7 @@ public class BattleController : MonoBehaviour
             var cand = turnOrder[turnIndex];
             if (cand != null && !cand.IsDead)
             {
+                ClearPreviewGhostPresentation();
                 activeUnit = cand;
                 break;
             }
@@ -386,6 +409,7 @@ public class BattleController : MonoBehaviour
 
     void OnActionComplete()
     {   
+        ClearPreviewGhostPresentation();
         ClearHoverAOEPreview();
         ClearAllPlannedActions();
         selectedSkill = null;
@@ -1142,6 +1166,9 @@ public class BattleController : MonoBehaviour
         // hover 프리뷰만 지우고 끝내면
         // planned move / planned skill 시각 정보가 같이 사라질 수 있으므로
         // 현재 계획 상태를 다시 복원
+        if (busy || !waitingInput || battleEnded || activeUnit == null || activeUnit.IsDead)
+            return;
+
         RefreshPlanningVisuals();
     }
 
@@ -1190,7 +1217,7 @@ public class BattleController : MonoBehaviour
         {
             var moveTile = PlannedMoveTile.Value;
 
-            tileHighlighter.ShowGhostTile(moveTile);
+            tileHighlighter.ClearGhostTile(); // 안전하게 정리
             tileHighlighter.ShowSelectedTile(moveTile);
 
             if (reachableMoveCameFromCache != null &&
@@ -1298,6 +1325,7 @@ public class BattleController : MonoBehaviour
                     tileHighlighter.ShowHoverHazardPathTiles(previewHazardTiles);
             }
         }
+        UpdatePreviewGhostPresentation();
     }
     
     public void ConfirmPlannedAction()
@@ -1315,6 +1343,11 @@ public class BattleController : MonoBehaviour
         busy = true;
         waitingInput = false;
         SetSkillButtonsInteractable(false);
+
+        ClearHoverMovePathPreview();
+        ClearPreviewGhostPresentation();
+        if (tileHighlighter != null)
+            tileHighlighter.ClearGhostTile();
 
         var executeQueue = new List<PlannedAction>(actionQueue);
         executeQueue.Sort((a, b) =>
@@ -1645,6 +1678,7 @@ public class BattleController : MonoBehaviour
         ClearHoverMovePathPreview();
 
         if (tileHighlighter) tileHighlighter.ClearGhostTile();
+        ClearPreviewGhostPresentation();
     }
 
     private void ClearAllPlannedActions()
@@ -1660,6 +1694,7 @@ public class BattleController : MonoBehaviour
         ClearPreviewTargetIndicators();
         ClearHoverAOEPreview();
         ClearHoverMovePathPreview();
+        ClearPreviewGhostPresentation();
     }
     
     void ApplyPreviewTargetIndicators(List<Unit> targets, Unit caster, Vector2Int casterPreviewPos)
@@ -1919,5 +1954,248 @@ public class BattleController : MonoBehaviour
         }
 
         return result;
+    }
+
+    void CacheActiveUnitSpriteRenderers(Unit unit)
+    {
+        activeUnitSpriteCache.Clear();
+        activeUnitOriginalColors.Clear();
+
+        if (unit == null) return;
+
+        var renderers = unit.GetComponentsInChildren<SpriteRenderer>(true);
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            var sr = renderers[i];
+            if (sr == null) continue;
+
+            activeUnitSpriteCache.Add(sr);
+            activeUnitOriginalColors.Add(sr.color);
+        }
+    }
+
+    void SetActiveUnitPreviewAlpha(Unit unit, float alpha)
+    {
+        if (unit == null) return;
+
+        if (!previewActorInitialized || previewActorSourceUnit != unit || activeUnitSpriteCache.Count == 0)
+        {
+            previewActorSourceUnit = unit;
+            CacheActiveUnitSpriteRenderers(unit);
+            previewActorInitialized = true;
+        }
+
+        for (int i = 0; i < activeUnitSpriteCache.Count; i++)
+        {
+            var sr = activeUnitSpriteCache[i];
+            if (sr == null) continue;
+
+            Color c = activeUnitOriginalColors[i];
+            c.a *= alpha;
+            sr.color = c;
+        }
+    }
+
+    void RestoreActiveUnitVisual(Unit unit)
+    {
+        if (unit == null) return;
+
+        if (!previewActorInitialized || previewActorSourceUnit != unit || activeUnitSpriteCache.Count == 0)
+        {
+            previewActorSourceUnit = unit;
+            CacheActiveUnitSpriteRenderers(unit);
+            previewActorInitialized = true;
+        }
+
+        for (int i = 0; i < activeUnitSpriteCache.Count; i++)
+        {
+            var sr = activeUnitSpriteCache[i];
+            if (sr == null) continue;
+
+            sr.color = activeUnitOriginalColors[i];
+        }
+    }
+
+    void UpdatePreviewActorTransform(Unit sourceUnit, Vector2Int previewGridPos)
+    {
+        if (!usePreviewActorGhost || sourceUnit == null || grid == null) return;
+
+        EnsurePreviewActor(sourceUnit);
+        if (previewActorRoot == null || previewActorSourceVisualRoot == null) return;
+
+        Vector3 sourceWorld = sourceUnit.transform.position;
+        Vector3 targetWorld = grid.GridToWorld(previewGridPos) + previewActorOffset;
+        Vector3 delta = targetWorld - sourceWorld;
+
+        // visual root 전체를 source visual root 위치 기준으로 이동
+        previewActorRoot.transform.position = previewActorSourceVisualRoot.position + delta;
+        previewActorRoot.transform.rotation = previewActorSourceVisualRoot.rotation;
+        previewActorRoot.transform.localScale = previewActorSourceVisualRoot.lossyScale;
+
+        // flip/정렬/알파 동기화
+        var srcRenderers = previewActorSourceVisualRoot.GetComponentsInChildren<SpriteRenderer>(true);
+        var dstRenderers = previewActorRoot.GetComponentsInChildren<SpriteRenderer>(true);
+
+        int count = Mathf.Min(srcRenderers.Length, dstRenderers.Length);
+        for (int i = 0; i < count; i++)
+        {
+            var src = srcRenderers[i];
+            var dst = dstRenderers[i];
+            if (src == null || dst == null) continue;
+
+            dst.flipX = src.flipX;
+            dst.flipY = src.flipY;
+            dst.sortingLayerID = src.sortingLayerID;
+            dst.sortingOrder = src.sortingOrder + 1;
+            dst.color = ForceOpaque(src.color);
+        }
+
+        // Animator가 있으면 바로 재생 유지
+        if (previewActorAnimator != null)
+        {
+            previewActorAnimator.speed = 1f;
+            previewActorAnimator.enabled = true;
+        }
+    }
+
+    void ClearPreviewActorVisual()
+    {
+        if (previewActorRoot != null)
+        {
+            Destroy(previewActorRoot);
+            previewActorRoot = null;
+        }
+
+        previewActorAnimator = null;
+        previewActorSourceVisualRoot = null;
+        previewDisabledBehaviours.Clear();
+        previewDisabledColliders.Clear();
+        previewDisabledCanvas.Clear();
+        previewActorSpriteCache.Clear(); // 남아 있어도 무방하지만 정리
+    }
+
+    void ClearPreviewGhostPresentation()
+    {
+        RestoreActiveUnitVisual(activeUnit);
+        ClearPreviewActorVisual();
+    }
+
+    void UpdatePreviewGhostPresentation()
+    {
+        if (!usePreviewActorGhost || activeUnit == null || activeUnit.IsDead || grid == null)
+        {
+            ClearPreviewGhostPresentation();
+            return;
+        }
+
+        if (!PlannedMoveTile.HasValue)
+        {
+            ClearPreviewGhostPresentation();
+            return;
+        }
+
+        // 기존 타일 ghost는 이제 안 씀
+        if (tileHighlighter != null)
+            tileHighlighter.ClearGhostTile();
+
+        SetActiveUnitPreviewAlpha(activeUnit, sourceActorPreviewAlpha);
+        UpdatePreviewActorTransform(activeUnit, PreviewPosition);
+    }
+
+    Transform FindPreviewVisualRoot(Unit unit)
+    {
+        if (unit == null) return null;
+
+        if (!string.IsNullOrEmpty(previewVisualRootName))
+        {
+            var t = unit.transform.Find(previewVisualRootName);
+            if (t != null) return t;
+        }
+
+        // fallback: Animator가 있는 첫 child
+        var anim = unit.GetComponentInChildren<Animator>(true);
+        if (anim != null) return anim.transform;
+
+        // 최후 fallback
+        return unit.transform;
+    }
+
+    void EnsurePreviewActor(Unit sourceUnit)
+    {
+        if (!usePreviewActorGhost || sourceUnit == null) return;
+
+        Transform visualRoot = FindPreviewVisualRoot(sourceUnit);
+        if (visualRoot == null) return;
+
+        // 같은 source + 같은 visual root면 재사용
+        if (previewActorRoot != null &&
+            previewActorSourceUnit == sourceUnit &&
+            previewActorSourceVisualRoot == visualRoot)
+            return;
+
+        ClearPreviewActorVisual();
+
+        previewActorSourceUnit = sourceUnit;
+        previewActorSourceVisualRoot = visualRoot;
+
+        previewActorRoot = Instantiate(visualRoot.gameObject, transform);
+        previewActorRoot.name = $"PreviewActor_{sourceUnit.name}";
+
+        // preview actor 내부에서 로직/충돌/UI 비활성
+        previewDisabledBehaviours.Clear();
+        previewDisabledColliders.Clear();
+        previewDisabledCanvas.Clear();
+
+        var behaviours = previewActorRoot.GetComponentsInChildren<Behaviour>(true);
+        for (int i = 0; i < behaviours.Length; i++)
+        {
+            var b = behaviours[i];
+            if (b == null) continue;
+
+            // Animator는 유지
+            if (b is Animator) continue;
+
+            // SpriteRenderer는 Behaviour가 아님, 여긴 영향 없음
+            // 전투 로직/입력/HUD 관련 스크립트 비활성
+            b.enabled = false;
+            previewDisabledBehaviours.Add(b);
+        }
+
+        var colliders = previewActorRoot.GetComponentsInChildren<Collider2D>(true);
+        for (int i = 0; i < colliders.Length; i++)
+        {
+            var c = colliders[i];
+            if (c == null) continue;
+            c.enabled = false;
+            previewDisabledColliders.Add(c);
+        }
+
+        var canvases = previewActorRoot.GetComponentsInChildren<Canvas>(true);
+        for (int i = 0; i < canvases.Length; i++)
+        {
+            var cv = canvases[i];
+            if (cv == null) continue;
+            cv.enabled = false;
+            previewDisabledCanvas.Add(cv);
+        }
+
+        previewActorAnimator = previewActorRoot.GetComponentInChildren<Animator>(true);
+
+        // preview actor는 항상 원본 알파 유지
+        var previewRenderers = previewActorRoot.GetComponentsInChildren<SpriteRenderer>(true);
+        for (int i = 0; i < previewRenderers.Length; i++)
+        {
+            var sr = previewRenderers[i];
+            if (sr == null) continue;
+
+            sr.color = ForceOpaque(sr.color);
+            sr.sortingOrder += 1;
+        }
+    }
+
+    Color ForceOpaque(Color c)
+    {
+        c.a = 1f;
+        return c;
     }
 }   
