@@ -3,304 +3,572 @@ using UnityEngine;
 
 public class TileHighlighter : MonoBehaviour
 {
+    public enum BaseOverlayType
+    {
+        None,
+        Move,
+        SkillRange,     // 기본 스킬 사거리
+        PreviewArea,    // hover 중 AOE 실제 영향 범위
+        Invalid
+    }
+
+    [System.Flags]
+    public enum TileFxFlags
+    {
+        None = 0,
+        Selected = 1 << 0,
+        TargetHit = 1 << 1,
+        FriendlyFire = 1 << 2,
+        Hazard = 1 << 3
+    }
+
+    [System.Serializable]
+    public class OverlayCellView
+    {
+        public GameObject root;
+
+        public GameObject baseMove;
+        public GameObject baseSkillRange;
+        public GameObject basePreviewArea;
+        public GameObject baseInvalid;
+
+        public GameObject selectedFx;
+        public GameObject targetFx;
+        public GameObject warningFx;
+        public GameObject hazardFx;
+
+        public void SetRootActive(bool active)
+        {
+            if (root != null) root.SetActive(active);
+        }
+
+        public void HideAllBase()
+        {
+            if (baseMove != null) baseMove.SetActive(false);
+            if (baseSkillRange != null) baseSkillRange.SetActive(false);
+            if (basePreviewArea != null) basePreviewArea.SetActive(false);
+            if (baseInvalid != null) baseInvalid.SetActive(false);
+        }
+
+        public void HideAllFx()
+        {
+            if (selectedFx != null) selectedFx.SetActive(false);
+            if (targetFx != null) targetFx.SetActive(false);
+            if (warningFx != null) warningFx.SetActive(false);
+            if (hazardFx != null) hazardFx.SetActive(false);
+        }
+    }
+
     [Header("Refs")]
     public GridManager grid;
 
-    [Header("Prefabs")]
-    public GameObject moveTilePrefab;
-    public GameObject pathTilePrefab;
-    public GameObject rangePrefab;
-    public GameObject targetPrefab;
-    public GameObject ghostTilePrefab;
-    public GameObject invalidTilePrefab;
-    [SerializeField] private GameObject hazardPathPrefab;
+    [Header("Base Overlay Prefabs")]
+    public GameObject moveTilePrefab;          // 파랑
+    public GameObject skillRangeTilePrefab;    // 주황 - 기본 스킬 사거리
+    public GameObject previewAreaTilePrefab;   // 주황 - hover AOE 범위
+    public GameObject invalidTilePrefab;       // 빨강
 
-    private readonly Dictionary<Vector2Int, GameObject> moveActive = new(128);
-    private readonly Dictionary<Vector2Int, GameObject> rangeActive = new(256);
-    private readonly Dictionary<Vector2Int, GameObject> targetActive = new(64);
-    private readonly Dictionary<Vector2Int, GameObject> pathActive = new(64);
-    private readonly Dictionary<Vector2Int, GameObject> plannedPathActive = new(64);
-    private readonly Dictionary<Vector2Int, GameObject> ghostActive = new();
-    private readonly Dictionary<Vector2Int, GameObject> invalidActive = new();
+    [Header("FX Prefabs")]
+    public GameObject selectedFxPrefab;
+    public GameObject targetFxPrefab;
+    public GameObject warningFxPrefab;         // friendly fire
+    public GameObject hazardFxPrefab;
 
-    private readonly Dictionary<Vector2Int, (Sprite sprite, Color color)> moveBackup = new(64);
-    private readonly Dictionary<Vector2Int, (Sprite sprite, Color color)> rangeBackup = new(64);
-    private readonly HashSet<Vector2Int> pathOverlaySet = new(64);
-    private readonly HashSet<Vector2Int> targetOverlaySet = new(64);
+    [Header("Path / Ghost")]
+    public GameObject ghostPrefab;
+    public GameObject pathArrowPrefab;
 
-    private readonly List<GameObject> hoverHazardPathPool = new List<GameObject>();
-    private readonly List<GameObject> plannedHazardPathPool = new List<GameObject>();
+    [Header("Placement")]
+    public Vector3 overlayOffset = new Vector3(0f, 0f, -0.1f);
+    public Vector3 fxOffset = new Vector3(0f, 0f, -0.2f);
+    public Vector3 arrowOffset = new Vector3(0f, 0f, -0.25f);
+    public Vector3 ghostOffset = new Vector3(0f, 0.05f, -0.3f);
+
+    [Header("Debug")]
+    public bool debugLog = false;
+
+    // =========================
+    // Base State
+    // =========================
+    readonly HashSet<Vector2Int> moveTiles = new HashSet<Vector2Int>();
+    readonly HashSet<Vector2Int> skillRangeTiles = new HashSet<Vector2Int>();
+    readonly HashSet<Vector2Int> previewAreaTiles = new HashSet<Vector2Int>();
+    readonly HashSet<Vector2Int> invalidTiles = new HashSet<Vector2Int>();
+
+    // =========================
+    // FX State
+    // =========================
+    readonly HashSet<Vector2Int> selectedFxTiles = new HashSet<Vector2Int>();
+    readonly HashSet<Vector2Int> targetFxTiles = new HashSet<Vector2Int>();
+    readonly HashSet<Vector2Int> warningFxTiles = new HashSet<Vector2Int>();
+    readonly HashSet<Vector2Int> hazardFxTiles = new HashSet<Vector2Int>();
+
+    readonly Dictionary<Vector2Int, OverlayCellView> cells = new Dictionary<Vector2Int, OverlayCellView>();
+
+    // =========================
+    // Path / Ghost State
+    // =========================
+    readonly List<GameObject> hoverPathArrows = new List<GameObject>();
+    readonly List<GameObject> plannedPathArrows = new List<GameObject>();
+    readonly List<GameObject> hoverHazardMarkers = new List<GameObject>();
+    readonly List<GameObject> plannedHazardMarkers = new List<GameObject>();
+
+    GameObject ghostInstance;
 
     void Awake()
     {
         if (!grid) grid = GridManager.I;
     }
 
-    public void ClearAll()
+    // =========================================================
+    // Public API - Base Overlay
+    // =========================================================
+
+    public void ShowMoveTiles(IEnumerable<Vector2Int> tiles)
     {
-        ClearMove();
-        ClearRange();
-        ClearTarget();
-        ClearPath();
-        ClearPlannedPath();
-        ClearGhost();
-        ClearInvalid();
-        ClearHazardPath();
+        moveTiles.Clear();
+        AddToSet(moveTiles, tiles);
+        RebuildVisuals();
     }
 
-    public void ClearMove() => ClearDict(moveActive);
-    public void ClearRange() => ClearDict(rangeActive);
-    public void ClearTarget() => ClearDict(targetActive);
-    public void ClearGhost() => ClearDict(ghostActive);
-    public void ClearInvalid() => ClearDict(invalidActive);
-    public void ClearPlannedPath() => ClearDict(plannedPathActive);
-
-    void ClearDict(Dictionary<Vector2Int, GameObject> dict)
-    {
-        foreach (var kv in dict)
-            if (kv.Value) Destroy(kv.Value);
-        dict.Clear();
-    }
-
-    public void ShowReachableMoveTiles(Unit unit)
-    {
-        if (unit == null) return;
-        if (!grid) grid = GridManager.I;
-        if (!grid || !moveTilePrefab) return;
-
-        ClearAll();
-
-        var costs = grid.GetReachableCosts(unit, unit.moveRange);
-        foreach (var p in costs.Keys)
-            SpawnTile(p, moveTilePrefab, moveActive);
-    }
-
-    public void ShowMoveTiles(IEnumerable<Vector2Int> moveTiles)
-    {
-        if (!grid) grid = GridManager.I;
-        if (!grid || !moveTilePrefab) return;
-
-        ClearAll();
-        if (moveTiles == null) return;
-
-        foreach (var p in moveTiles)
-        {
-            if (!grid.InBounds(p)) continue;
-            SpawnTile(p, moveTilePrefab, moveActive);
-        }
-    }
-
+    // 기본 스킬 사거리 전용
     public void ShowRangeTiles(IEnumerable<Vector2Int> tiles)
     {
-        if (!grid) grid = GridManager.I;
-        if (!grid || !rangePrefab) return;
-
-        ClearRange();
-        ClearTargetOverlay();
-        ClearTarget();
-
-        foreach (var p in tiles)
-        {
-            if (!grid.InBounds(p)) continue;
-            SpawnTile(p, rangePrefab, rangeActive);
-        }
+        skillRangeTiles.Clear();
+        AddToSet(skillRangeTiles, tiles);
+        RebuildVisuals();
     }
 
-    public void ShowTargetTiles(IEnumerable<Vector2Int> tiles)
+    public void ClearRangeTiles()
     {
-        if (!grid) grid = GridManager.I;
-        if (!grid || !targetPrefab) return;
-
-        ClearTarget();
-        ClearTargetOverlay();
-        ClearTarget();
-
-        var refSr = targetPrefab.GetComponentInChildren<SpriteRenderer>();
-        if (refSr == null) return;
-
-        foreach (var p in tiles)
-        {
-            if (!grid.InBounds(p)) continue;
-            if (rangeActive.TryGetValue(p, out var rgo) && rgo)
-            {
-                var rsr = rgo.GetComponentInChildren<SpriteRenderer>();
-                if (rsr != null)
-                {
-                    if (!rangeBackup.ContainsKey(p)) rangeBackup[p] = (rsr.sprite, rsr.color);
-                    rsr.sprite = refSr.sprite;
-                    rsr.color = refSr.color;
-                    targetOverlaySet.Add(p);
-                    continue;
-                }
-            }
-            SpawnTile(p, targetPrefab, targetActive);
-        }
+        skillRangeTiles.Clear();
+        RebuildVisuals();
     }
 
-    void SpawnTile(Vector2Int gridPos, GameObject prefab, Dictionary<Vector2Int, GameObject> dict)
+    // hover AOE 실제 영향 범위 전용
+    public void ShowPreviewAreaTiles(IEnumerable<Vector2Int> tiles)
     {
-        if (dict.ContainsKey(gridPos)) return;
-
-        Vector3 world = grid.GridToWorld(gridPos);
-        var go = Instantiate(prefab, world, Quaternion.identity, transform);
-
-        var sr = go.GetComponentInChildren<SpriteRenderer>();
-        if (sr != null)
-            sr.sortingOrder = -Mathf.RoundToInt(world.y * 100f) - 1;
-
-        dict[gridPos] = go;
+        previewAreaTiles.Clear();
+        AddToSet(previewAreaTiles, tiles);
+        RebuildVisuals();
     }
 
-    public void ClearPath()
+    public void ClearPreviewAreaTiles()
     {
-        foreach (var p in pathOverlaySet)
-        {
-            if (moveActive.TryGetValue(p, out var go) && go)
-            {
-                var sr = go.GetComponentInChildren<SpriteRenderer>();
-                if (sr != null && moveBackup.TryGetValue(p, out var bak))
-                {
-                    sr.sprite = bak.sprite;
-                    sr.color = bak.color;
-                }
-            }
-        }
-        pathOverlaySet.Clear();
-        moveBackup.Clear();
-    }
-
-    public void ClearTargetOverlay()
-    {
-        foreach (var p in targetOverlaySet)
-        {
-            if (rangeActive.TryGetValue(p, out var go) && go)
-            {
-                var sr = go.GetComponentInChildren<SpriteRenderer>();
-                if (sr != null && rangeBackup.TryGetValue(p, out var bak))
-                {
-                    sr.sprite = bak.sprite;
-                    sr.color = bak.color;
-                }
-            }
-        }
-        targetOverlaySet.Clear();
-        rangeBackup.Clear();
-    }
-
-    // hover path: move 타일 승격
-    public void ShowPathTiles(IEnumerable<Vector2Int> tiles)
-    {
-        if (!grid) grid = GridManager.I;
-        if (!grid || !pathTilePrefab) return;
-
-        ClearPath();
-        var refSr = pathTilePrefab.GetComponentInChildren<SpriteRenderer>();
-        if (refSr == null) return;
-
-        foreach (var p in tiles)
-        {
-            if (!grid.InBounds(p)) continue;
-            if (!moveActive.TryGetValue(p, out var go) || !go) continue;
-
-            var sr = go.GetComponentInChildren<SpriteRenderer>();
-            if (sr == null) continue;
-
-            if (!moveBackup.ContainsKey(p)) moveBackup[p] = (sr.sprite, sr.color);
-            sr.sprite = refSr.sprite;
-            sr.color = refSr.color;
-            pathOverlaySet.Add(p);
-        }
-    }
-
-    // planned/ghost path: 별도 spawn
-    public void ShowPlannedPathTiles(IEnumerable<Vector2Int> tiles)
-    {
-        ClearPlannedPath();
-
-        if (!grid) grid = GridManager.I;
-        if (!grid || !pathTilePrefab || tiles == null) return;
-
-        foreach (var p in tiles)
-        {
-            if (!grid.InBounds(p)) continue;
-            SpawnTile(p, pathTilePrefab, plannedPathActive);
-        }
-    }
-
-    public void ShowGhostTile(Vector2Int tile)
-    {
-        ClearGhost();
-
-        if (ghostTilePrefab == null) return;
-
-        Vector3 pos = GridManager.I.GridToWorld(tile);
-        var go = Instantiate(ghostTilePrefab, pos, Quaternion.identity, transform);
-        ghostActive[tile] = go;
+        previewAreaTiles.Clear();
+        RebuildVisuals();
     }
 
     public void ShowInvalidTile(Vector2Int tile)
     {
-        ClearInvalid();
-
-        if (invalidTilePrefab == null) return;
-
-        Vector3 pos = GridManager.I.GridToWorld(tile);
-        var go = Instantiate(invalidTilePrefab, pos, Quaternion.identity, transform);
-        invalidActive[tile] = go;
+        invalidTiles.Clear();
+        invalidTiles.Add(tile);
+        RebuildVisuals();
     }
 
-    public void ShowHoverHazardPathTiles(IEnumerable<Vector2Int> tiles)
+    public void ClearInvalid()
     {
-        ClearHoverHazardPath();
-        if (tiles == null) return;
-
-        foreach (var p in tiles)
-            SpawnHazardPathTile(p, hoverHazardPathPool);
+        invalidTiles.Clear();
+        RebuildVisuals();
     }
 
-    public void ShowPlannedHazardPathTiles(IEnumerable<Vector2Int> tiles)
-    {
-        ClearPlannedHazardPath();
-        if (tiles == null) return;
+    // =========================================================
+    // Public API - Tile FX
+    // =========================================================
 
-        foreach (var p in tiles)
-            SpawnHazardPathTile(p, plannedHazardPathPool);
+    public void ShowSelectedTile(Vector2Int tile)
+    {
+        selectedFxTiles.Clear();
+        selectedFxTiles.Add(tile);
+        RebuildVisuals();
+    }
+
+    public void ClearSelectedTile()
+    {
+        selectedFxTiles.Clear();
+        RebuildVisuals();
+    }
+
+    public void ShowTargetTiles(IEnumerable<Vector2Int> tiles)
+    {
+        targetFxTiles.Clear();
+        AddToSet(targetFxTiles, tiles);
+        RebuildVisuals();
+    }
+
+    public void ClearTarget()
+    {
+        targetFxTiles.Clear();
+        RebuildVisuals();
+    }
+
+    public void ShowFriendlyFireTiles(IEnumerable<Vector2Int> tiles)
+    {
+        warningFxTiles.Clear();
+        AddToSet(warningFxTiles, tiles);
+        RebuildVisuals();
+    }
+
+    public void ClearFriendlyFireTiles()
+    {
+        warningFxTiles.Clear();
+        RebuildVisuals();
+    }
+
+    public void ShowHazardTiles(IEnumerable<Vector2Int> tiles)
+    {
+        hazardFxTiles.Clear();
+        AddToSet(hazardFxTiles, tiles);
+        RebuildVisuals();
+    }
+
+    public void ClearHazardTiles()
+    {
+        hazardFxTiles.Clear();
+        RebuildVisuals();
+    }
+
+    public void ClearTargetOverlay()
+    {
+        targetFxTiles.Clear();
+        warningFxTiles.Clear();
+        RebuildVisuals();
+    }
+
+    // =========================================================
+    // Public API - Path / Hazard Path / Ghost
+    // =========================================================
+
+    public void ShowPathTiles(List<Vector2Int> path)
+    {
+        RebuildArrowPath(path, hoverPathArrows);
+    }
+
+    public void ClearPath()
+    {
+        ClearSpawnedList(hoverPathArrows);
+    }
+
+    public void ShowPlannedPathTiles(List<Vector2Int> path)
+    {
+        RebuildArrowPath(path, plannedPathArrows);
+    }
+
+    public void ClearPlannedPath()
+    {
+        ClearSpawnedList(plannedPathArrows);
+    }
+
+    public void ShowHoverHazardPathTiles(List<Vector2Int> tiles)
+    {
+        RebuildHazardMarkers(tiles, hoverHazardMarkers);
     }
 
     public void ClearHoverHazardPath()
     {
-        ClearPool(hoverHazardPathPool);
+        ClearSpawnedList(hoverHazardMarkers);
+    }
+
+    public void ShowPlannedHazardPathTiles(List<Vector2Int> tiles)
+    {
+        RebuildHazardMarkers(tiles, plannedHazardMarkers);
     }
 
     public void ClearPlannedHazardPath()
     {
-        ClearPool(plannedHazardPathPool);
+        ClearSpawnedList(plannedHazardMarkers);
     }
 
-    public void ClearHazardPath()
+    public void ShowGhostTile(Vector2Int tile)
     {
+        if (ghostPrefab == null || grid == null) return;
+
+        Vector3 world = GetWorld(tile) + ghostOffset;
+
+        if (ghostInstance == null)
+        {
+            ghostInstance = Instantiate(ghostPrefab, world, Quaternion.identity, transform);
+            ghostInstance.name = $"Ghost ({tile.x},{tile.y})";
+        }
+        else
+        {
+            ghostInstance.transform.position = world;
+            ghostInstance.SetActive(true);
+            ghostInstance.name = $"Ghost ({tile.x},{tile.y})";
+        }
+    }
+
+    public void ClearGhostTile()
+    {
+        if (ghostInstance != null)
+            ghostInstance.SetActive(false);
+    }
+
+    // =========================================================
+    // Public API - All Clear
+    // =========================================================
+
+    public void ClearAll()
+    {
+        moveTiles.Clear();
+        skillRangeTiles.Clear();
+        previewAreaTiles.Clear();
+        invalidTiles.Clear();
+
+        selectedFxTiles.Clear();
+        targetFxTiles.Clear();
+        warningFxTiles.Clear();
+        hazardFxTiles.Clear();
+
+        ClearPath();
+        ClearPlannedPath();
         ClearHoverHazardPath();
         ClearPlannedHazardPath();
+        ClearGhostTile();
+
+        RebuildVisuals();
     }
 
-    private void ClearPool(List<GameObject> pool)
+    // =========================================================
+    // Core Visual Composition
+    // =========================================================
+
+    BaseOverlayType ResolveBaseType(Vector2Int tile)
     {
-        for (int i = 0; i < pool.Count; i++)
+        // 우선순위:
+        // Invalid > PreviewArea > SkillRange > Move
+        // 이렇게 해야 hover AOE가 기본 사거리 위에 보이고,
+        // 범위 밖 invalid는 현재 hover 중일 때만 강하게 보인다.
+        if (invalidTiles.Contains(tile)) return BaseOverlayType.Invalid;
+        if (previewAreaTiles.Contains(tile)) return BaseOverlayType.PreviewArea;
+        if (skillRangeTiles.Contains(tile)) return BaseOverlayType.SkillRange;
+        if (moveTiles.Contains(tile)) return BaseOverlayType.Move;
+        return BaseOverlayType.None;
+    }
+
+    TileFxFlags ResolveFx(Vector2Int tile)
+    {
+        TileFxFlags fx = TileFxFlags.None;
+
+        if (selectedFxTiles.Contains(tile)) fx |= TileFxFlags.Selected;
+        if (targetFxTiles.Contains(tile)) fx |= TileFxFlags.TargetHit;
+        if (warningFxTiles.Contains(tile)) fx |= TileFxFlags.FriendlyFire;
+        if (hazardFxTiles.Contains(tile)) fx |= TileFxFlags.Hazard;
+
+        return fx;
+    }
+
+    void RebuildVisuals()
+    {
+        var allTiles = new HashSet<Vector2Int>();
+
+        allTiles.UnionWith(moveTiles);
+        allTiles.UnionWith(skillRangeTiles);
+        allTiles.UnionWith(previewAreaTiles);
+        allTiles.UnionWith(invalidTiles);
+
+        allTiles.UnionWith(selectedFxTiles);
+        allTiles.UnionWith(targetFxTiles);
+        allTiles.UnionWith(warningFxTiles);
+        allTiles.UnionWith(hazardFxTiles);
+
+        foreach (var kv in cells)
         {
-            if (pool[i] != null)
-                Destroy(pool[i]);
+            if (kv.Value == null) continue;
+            kv.Value.SetRootActive(false);
+            kv.Value.HideAllBase();
+            kv.Value.HideAllFx();
         }
-        pool.Clear();
+
+        foreach (var tile in allTiles)
+        {
+            var cell = GetOrCreateCell(tile);
+            if (cell == null) continue;
+
+            cell.SetRootActive(true);
+            ApplyBase(cell, ResolveBaseType(tile));
+            ApplyFx(cell, ResolveFx(tile));
+        }
     }
 
-    private void SpawnHazardPathTile(Vector2Int gridPos, List<GameObject> pool)
+    OverlayCellView GetOrCreateCell(Vector2Int tile)
     {
-        if (hazardPathPrefab == null) return;
-        if (!grid) grid = GridManager.I;
-        if (!grid || !grid.InBounds(gridPos)) return;
+        if (cells.TryGetValue(tile, out var cached) && cached != null)
+            return cached;
 
-        Vector3 world = grid.GridToWorld(gridPos);
-        var go = Instantiate(hazardPathPrefab, world, Quaternion.identity, transform);
-        pool.Add(go);
+        if (grid == null) return null;
+
+        var root = new GameObject($"OverlayCell ({tile.x},{tile.y})");
+        root.transform.SetParent(transform, false);
+        root.transform.position = GetWorld(tile) + overlayOffset;
+
+        var cell = new OverlayCellView();
+        cell.root = root;
+
+        cell.baseMove = CreateChild(moveTilePrefab, root.transform, Vector3.zero, "Base_Move");
+        cell.baseSkillRange = CreateChild(skillRangeTilePrefab, root.transform, Vector3.zero, "Base_SkillRange");
+        cell.basePreviewArea = CreateChild(previewAreaTilePrefab, root.transform, Vector3.zero, "Base_PreviewArea");
+        cell.baseInvalid = CreateChild(invalidTilePrefab, root.transform, Vector3.zero, "Base_Invalid");
+
+        Vector3 localFxOffset = fxOffset - overlayOffset;
+        cell.selectedFx = CreateChild(selectedFxPrefab, root.transform, localFxOffset, "FX_Selected");
+        cell.targetFx = CreateChild(targetFxPrefab, root.transform, localFxOffset, "FX_Target");
+        cell.warningFx = CreateChild(warningFxPrefab, root.transform, localFxOffset, "FX_FriendlyFire");
+        cell.hazardFx = CreateChild(hazardFxPrefab, root.transform, localFxOffset, "FX_Hazard");
+
+        cell.HideAllBase();
+        cell.HideAllFx();
+        cell.SetRootActive(false);
+
+        cells[tile] = cell;
+        return cell;
+    }
+
+    void ApplyBase(OverlayCellView cell, BaseOverlayType baseType)
+    {
+        cell.HideAllBase();
+
+        switch (baseType)
+        {
+            case BaseOverlayType.Move:
+                if (cell.baseMove != null) cell.baseMove.SetActive(true);
+                break;
+
+            case BaseOverlayType.SkillRange:
+                if (cell.baseSkillRange != null) cell.baseSkillRange.SetActive(true);
+                break;
+
+            case BaseOverlayType.PreviewArea:
+                if (cell.basePreviewArea != null) cell.basePreviewArea.SetActive(true);
+                break;
+
+            case BaseOverlayType.Invalid:
+                if (cell.baseInvalid != null) cell.baseInvalid.SetActive(true);
+                break;
+        }
+    }
+
+    void ApplyFx(OverlayCellView cell, TileFxFlags fx)
+    {
+        cell.HideAllFx();
+
+        if ((fx & TileFxFlags.Selected) != 0 && cell.selectedFx != null)
+            cell.selectedFx.SetActive(true);
+
+        if ((fx & TileFxFlags.TargetHit) != 0 && cell.targetFx != null)
+            cell.targetFx.SetActive(true);
+
+        if ((fx & TileFxFlags.FriendlyFire) != 0 && cell.warningFx != null)
+            cell.warningFx.SetActive(true);
+
+        if ((fx & TileFxFlags.Hazard) != 0 && cell.hazardFx != null)
+            cell.hazardFx.SetActive(true);
+    }
+
+    // =========================================================
+    // Path Rendering
+    // =========================================================
+
+    void RebuildArrowPath(List<Vector2Int> path, List<GameObject> storage)
+    {
+        ClearSpawnedList(storage);
+
+        if (pathArrowPrefab == null || grid == null || path == null || path.Count == 0)
+            return;
+
+        for (int i = 0; i < path.Count; i++)
+        {
+            Vector2Int tile = path[i];
+            Vector2 dir = Vector2.zero;
+
+            if (path.Count == 1)
+            {
+                dir = Vector2.right;
+            }
+            else if (i < path.Count - 1)
+            {
+                dir = (Vector2)(path[i + 1] - path[i]);
+            }
+            else
+            {
+                dir = (Vector2)(path[i] - path[i - 1]);
+            }
+
+            float angle = DirectionToZAngle(dir);
+            Vector3 world = GetWorld(tile) + arrowOffset;
+
+            var go = Instantiate(pathArrowPrefab, world, Quaternion.Euler(0f, 0f, angle), transform);
+            go.name = $"PathArrow ({tile.x},{tile.y})";
+            storage.Add(go);
+        }
+    }
+
+    void RebuildHazardMarkers(List<Vector2Int> tiles, List<GameObject> storage)
+    {
+        ClearSpawnedList(storage);
+
+        if (hazardFxPrefab == null || grid == null || tiles == null || tiles.Count == 0)
+            return;
+
+        for (int i = 0; i < tiles.Count; i++)
+        {
+            Vector2Int tile = tiles[i];
+            Vector3 world = GetWorld(tile) + fxOffset;
+            var go = Instantiate(hazardFxPrefab, world, Quaternion.identity, transform);
+            go.name = $"HazardPathFx ({tile.x},{tile.y})";
+            storage.Add(go);
+        }
+    }
+
+    float DirectionToZAngle(Vector2 dir)
+    {
+        if (dir.sqrMagnitude < 0.0001f) return 0f;
+        return Mathf.Atan2(dir.y, dir.x) * Mathf.Rad2Deg;
+    }
+
+    // =========================================================
+    // Helpers
+    // =========================================================
+
+    void AddToSet(HashSet<Vector2Int> set, IEnumerable<Vector2Int> tiles)
+    {
+        if (tiles == null) return;
+
+        foreach (var t in tiles)
+            set.Add(t);
+    }
+
+    GameObject CreateChild(GameObject prefab, Transform parent, Vector3 localOffset, string childName)
+    {
+        if (prefab == null) return null;
+
+        var go = Instantiate(prefab, parent);
+        go.name = childName;
+        go.transform.localPosition = localOffset;
+        go.transform.localRotation = Quaternion.identity;
+        go.SetActive(false);
+        return go;
+    }
+
+    void ClearSpawnedList(List<GameObject> list)
+    {
+        for (int i = 0; i < list.Count; i++)
+        {
+            if (list[i] != null)
+                Destroy(list[i]);
+        }
+        list.Clear();
+    }
+
+    Vector3 GetWorld(Vector2Int tile)
+    {
+        if (grid == null)
+        {
+            if (debugLog)
+                Debug.LogWarning("[TileHighlighter] GridManager missing.");
+            return Vector3.zero;
+        }
+
+        return grid.GridToWorld(tile);
     }
 }
