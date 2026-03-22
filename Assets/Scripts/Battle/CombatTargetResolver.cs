@@ -148,7 +148,10 @@ public static class CombatTargetResolver
             {
                 if (clickedUnit != null && IsAlive(clickedUnit))
                 {
-                    if (enemies.Contains(clickedUnit) &&
+                    bool canClickEnemy = enemies.Contains(clickedUnit);
+                    bool canClickAlly = allies.Contains(clickedUnit) && SkillMetaUtility.IsMostlyHelpfulSkill(skill);
+
+                    if ((canClickEnemy || canClickAlly) &&
                         CanCastPoint(casterPos, clickedUnit.GridPos))
                     {
                         AddUnique(clickedUnit);

@@ -966,9 +966,8 @@ MonoBehaviour:
   moveTilePrefab: {fileID: 2547561043615734335, guid: b317153a44766f941b563c20e757f503, type: 3}
   skillRangeTilePrefab: {fileID: 7971415546341332404, guid: 4c2668d7f561325408a3d5fef6ddea26, type: 3}
   previewAreaTilePrefab: {fileID: 1776917299451187783, guid: affa67701f0c10f4792f3937ec3b8118, type: 3}
-  invalidTilePrefab: {fileID: 410821288610592428, guid: a09910dc8df0ac44fa5ab002661cf429, type: 3}
   selectedFxPrefab: {fileID: 2441664175489196392, guid: e4ae683263bfafc45b72550784f3a434, type: 3}
-  targetFxPrefab: {fileID: 3812902537264089296, guid: 44eecea2d2b0a0f419a57fc65a49ae5f, type: 3}
+  targetFxPrefab: {fileID: 0}
   warningFxPrefab: {fileID: 6519044173866930026, guid: 136c17ad210d3d0449f8bff5362e2db4, type: 3}
   hazardFxPrefab: {fileID: 0}
   ghostPrefab: {fileID: 8474163127165659146, guid: 426b427ace37d044eb540f229e0c8ad2, type: 3}

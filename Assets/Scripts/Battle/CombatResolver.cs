@@ -56,7 +56,17 @@ public static class CombatResolver
             clickedUnit
         );
 
-        if (result.targets == null || result.targets.Count == 0)
+        bool allowEmptyAOE =
+            skill.targetMode == SkillTargetMode.ClickTileAOE &&
+            clickedTile.HasValue &&
+            CombatTargetResolver.IsPointCastable(
+                skill,
+                attacker.GridPos,
+                clickedTile.Value,
+                ctx.grid
+            );
+
+        if ((result.targets == null || result.targets.Count == 0) && !allowEmptyAOE)
             return result;
 
         if (spendAP)

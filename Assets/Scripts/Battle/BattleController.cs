@@ -955,20 +955,16 @@ public class BattleController : MonoBehaviour
             selectedSkill != null &&
             selectedSkill.targetMode == SkillTargetMode.ClickTileAOE)
         {
-            var resolved = CombatTargetResolver.ResolveTargetsFromPosition(
+            bool castable = CombatTargetResolver.IsPointCastable(
                 PlannedSkill,
-                activeUnit,
                 PreviewPosition,
-                GetCasterAllies(activeUnit),
-                GetCasterEnemies(activeUnit),
-                grid,
                 gridPos,
-                null
+                grid
             );
 
-            if (resolved.Count == 0) return;
+            if (!castable) return;
 
-            hoverTile = null; // 추가
+            hoverTile = null;
             SetPlannedSkillTarget(gridPos, null);
             RefreshPlanningVisuals();
             return;
@@ -1480,7 +1476,17 @@ public class BattleController : MonoBehaviour
                     action.clickedUnit
                 );
 
-                if (finalTargets.Count > 0)
+                bool allowEmptyAOE =
+                    action.skill.targetMode == SkillTargetMode.ClickTileAOE &&
+                    action.clickedTile.HasValue &&
+                    CombatTargetResolver.IsPointCastable(
+                        action.skill,
+                        activeUnit.GridPos,
+                        action.clickedTile.Value,
+                        grid
+                    );
+
+                if (finalTargets.Count > 0 || allowEmptyAOE)
                 {
                     yield return RunSkill(
                         activeUnit,
