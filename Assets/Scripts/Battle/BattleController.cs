@@ -1013,10 +1013,12 @@ public class BattleController : MonoBehaviour
         hoverTile = gridPos;
 
         tileHighlighter.ClearPreviewAreaTiles();
-        tileHighlighter.ClearInvalid();
         tileHighlighter.ClearTargetOverlay();
         tileHighlighter.ClearSelectedTile();
         ClearPreviewTargetIndicators();
+
+        // 모든 hover에서 selected-fx 표시
+        tileHighlighter.ShowSelectedTile(gridPos);
 
         bool castable = CombatTargetResolver.IsPointCastable(
             PlannedSkill,
@@ -1027,14 +1029,13 @@ public class BattleController : MonoBehaviour
 
         if (!castable)
         {
-            tileHighlighter.ShowInvalidTile(gridPos);
+            // invalid 삭제: selected-fx만 남기고 종료
             return;
         }
 
-        // AOE 전체 영역 = 주황 베이스
+        // AOE 전체 영역 = preview area
         var aoeTiles = BuildManhattanDisk(gridPos, Mathf.Max(0, PlannedSkill.aoeRadius));
         tileHighlighter.ShowPreviewAreaTiles(aoeTiles);
-        tileHighlighter.ShowSelectedTile(gridPos);
 
         // 실제 적중 대상 분리
         previewTargetUnits.Clear();
@@ -1070,7 +1071,6 @@ public class BattleController : MonoBehaviour
         {
             tileHighlighter.ClearPreviewAreaTiles();
             tileHighlighter.ClearTargetOverlay();
-            tileHighlighter.ClearInvalid();
             tileHighlighter.ClearSelectedTile();
         }
 
@@ -1112,11 +1112,15 @@ public class BattleController : MonoBehaviour
             reachableMoveCameFromCache = data.cameFrom;
         }
 
+        tileHighlighter.ClearPath();
+        tileHighlighter.ClearHoverHazardPath();
+        tileHighlighter.ClearSelectedTile();
+
+        // 모든 hover에서 selected-fx 표시
+        tileHighlighter.ShowSelectedTile(gridPos);
+
         if (!reachableMoveCache.ContainsKey(gridPos))
         {
-            tileHighlighter.ClearPath();
-            tileHighlighter.ClearHoverHazardPath();
-            tileHighlighter.ClearSelectedTile();
             hoverMoveTile = null;
             RefreshPlanningVisuals();
             return;
@@ -1124,9 +1128,6 @@ public class BattleController : MonoBehaviour
 
         if (gridPos == activeUnit.GridPos)
         {
-            tileHighlighter.ClearPath();
-            tileHighlighter.ClearHoverHazardPath();
-            tileHighlighter.ClearSelectedTile();
             hoverMoveTile = null;
             RefreshPlanningVisuals();
             return;
@@ -1137,14 +1138,9 @@ public class BattleController : MonoBehaviour
 
         var path = grid.ReconstructPath(activeUnit.GridPos, gridPos, reachableMoveCameFromCache);
 
-        tileHighlighter.ClearPath();
-        tileHighlighter.ClearHoverHazardPath();
-        tileHighlighter.ClearSelectedTile();
-
         if (path != null && path.Count > 0)
         {
             tileHighlighter.ShowPathTiles(path);
-            tileHighlighter.ShowSelectedTile(gridPos);
 
             BuildPreviewHazardTiles(path);
             if (previewHazardTiles.Count > 0)
@@ -1238,10 +1234,15 @@ public class BattleController : MonoBehaviour
         // -------------------------
         // Skill preview base overlay
         // -------------------------
+        // Skill preview base overlay
         if (inputMode == PlayerInputMode.SkillPreview && PlannedSkill != null)
         {
             var castableTiles = GetCastableTilesForPreview(PlannedSkill, PreviewPosition);
             tileHighlighter.ShowRangeTiles(castableTiles);
+
+
+            // 2) 기본은 실제 범위 없음
+            tileHighlighter.ClearPreviewAreaTiles();
 
             // ClickSingle locked preview
             if (PlannedSkill.targetMode == SkillTargetMode.ClickSingle && PlannedClickedUnit != null)
@@ -1262,6 +1263,20 @@ public class BattleController : MonoBehaviour
 
                 SplitPreviewTargetTiles(previewTargetUnits, activeUnit, PreviewPosition);
 
+                // 단일 타겟은 실제 범위를 "타겟 위치 타일"로 연주황 표시 가능
+                var singlePreviewTiles = new HashSet<Vector2Int>();
+                for (int i = 0; i < previewTargetUnits.Count; i++)
+                {
+                    var u = previewTargetUnits[i];
+                    if (u == null || u.IsDead) continue;
+
+                    Vector2Int pos = (u == activeUnit) ? PreviewPosition : u.GridPos;
+                    singlePreviewTiles.Add(pos);
+                }
+
+                if (singlePreviewTiles.Count > 0)
+                    tileHighlighter.ShowPreviewAreaTiles(singlePreviewTiles);
+
                 if (previewEnemyTiles.Count > 0)
                     tileHighlighter.ShowTargetTiles(previewEnemyTiles);
 
@@ -1276,8 +1291,11 @@ public class BattleController : MonoBehaviour
             {
                 Vector2Int center = PlannedClickedTile.Value;
 
+                // 실제 스킬 범위는 연주황
                 var aoeTiles = BuildManhattanDisk(center, Mathf.Max(0, PlannedSkill.aoeRadius));
-                tileHighlighter.ShowRangeTiles(aoeTiles);
+                tileHighlighter.ShowPreviewAreaTiles(aoeTiles);
+
+                // 중심 타일은 selected fx
                 tileHighlighter.ShowSelectedTile(center);
 
                 previewTargetUnits.Clear();

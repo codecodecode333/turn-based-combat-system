@@ -8,8 +8,7 @@ public class TileHighlighter : MonoBehaviour
         None,
         Move,
         SkillRange,     // 기본 스킬 사거리
-        PreviewArea,    // hover 중 AOE 실제 영향 범위
-        Invalid
+        PreviewArea     // hover 중 AOE 실제 영향 범위
     }
 
     [System.Flags]
@@ -30,7 +29,6 @@ public class TileHighlighter : MonoBehaviour
         public GameObject baseMove;
         public GameObject baseSkillRange;
         public GameObject basePreviewArea;
-        public GameObject baseInvalid;
 
         public GameObject selectedFx;
         public GameObject targetFx;
@@ -47,7 +45,6 @@ public class TileHighlighter : MonoBehaviour
             if (baseMove != null) baseMove.SetActive(false);
             if (baseSkillRange != null) baseSkillRange.SetActive(false);
             if (basePreviewArea != null) basePreviewArea.SetActive(false);
-            if (baseInvalid != null) baseInvalid.SetActive(false);
         }
 
         public void HideAllFx()
@@ -66,7 +63,6 @@ public class TileHighlighter : MonoBehaviour
     public GameObject moveTilePrefab;          // 파랑
     public GameObject skillRangeTilePrefab;    // 주황 - 기본 스킬 사거리
     public GameObject previewAreaTilePrefab;   // 주황 - hover AOE 범위
-    public GameObject invalidTilePrefab;       // 빨강
 
     [Header("FX Prefabs")]
     public GameObject selectedFxPrefab;
@@ -93,7 +89,6 @@ public class TileHighlighter : MonoBehaviour
     readonly HashSet<Vector2Int> moveTiles = new HashSet<Vector2Int>();
     readonly HashSet<Vector2Int> skillRangeTiles = new HashSet<Vector2Int>();
     readonly HashSet<Vector2Int> previewAreaTiles = new HashSet<Vector2Int>();
-    readonly HashSet<Vector2Int> invalidTiles = new HashSet<Vector2Int>();
 
     // =========================
     // FX State
@@ -156,19 +151,6 @@ public class TileHighlighter : MonoBehaviour
     public void ClearPreviewAreaTiles()
     {
         previewAreaTiles.Clear();
-        RebuildVisuals();
-    }
-
-    public void ShowInvalidTile(Vector2Int tile)
-    {
-        invalidTiles.Clear();
-        invalidTiles.Add(tile);
-        RebuildVisuals();
-    }
-
-    public void ClearInvalid()
-    {
-        invalidTiles.Clear();
         RebuildVisuals();
     }
 
@@ -313,7 +295,6 @@ public class TileHighlighter : MonoBehaviour
         moveTiles.Clear();
         skillRangeTiles.Clear();
         previewAreaTiles.Clear();
-        invalidTiles.Clear();
 
         selectedFxTiles.Clear();
         targetFxTiles.Clear();
@@ -336,10 +317,7 @@ public class TileHighlighter : MonoBehaviour
     BaseOverlayType ResolveBaseType(Vector2Int tile)
     {
         // 우선순위:
-        // Invalid > PreviewArea > SkillRange > Move
-        // 이렇게 해야 hover AOE가 기본 사거리 위에 보이고,
-        // 범위 밖 invalid는 현재 hover 중일 때만 강하게 보인다.
-        if (invalidTiles.Contains(tile)) return BaseOverlayType.Invalid;
+        // PreviewArea > SkillRange > Move
         if (previewAreaTiles.Contains(tile)) return BaseOverlayType.PreviewArea;
         if (skillRangeTiles.Contains(tile)) return BaseOverlayType.SkillRange;
         if (moveTiles.Contains(tile)) return BaseOverlayType.Move;
@@ -365,7 +343,6 @@ public class TileHighlighter : MonoBehaviour
         allTiles.UnionWith(moveTiles);
         allTiles.UnionWith(skillRangeTiles);
         allTiles.UnionWith(previewAreaTiles);
-        allTiles.UnionWith(invalidTiles);
 
         allTiles.UnionWith(selectedFxTiles);
         allTiles.UnionWith(targetFxTiles);
@@ -408,7 +385,6 @@ public class TileHighlighter : MonoBehaviour
         cell.baseMove = CreateChild(moveTilePrefab, root.transform, Vector3.zero, "Base_Move");
         cell.baseSkillRange = CreateChild(skillRangeTilePrefab, root.transform, Vector3.zero, "Base_SkillRange");
         cell.basePreviewArea = CreateChild(previewAreaTilePrefab, root.transform, Vector3.zero, "Base_PreviewArea");
-        cell.baseInvalid = CreateChild(invalidTilePrefab, root.transform, Vector3.zero, "Base_Invalid");
 
         Vector3 localFxOffset = fxOffset - overlayOffset;
         cell.selectedFx = CreateChild(selectedFxPrefab, root.transform, localFxOffset, "FX_Selected");
@@ -440,10 +416,6 @@ public class TileHighlighter : MonoBehaviour
 
             case BaseOverlayType.PreviewArea:
                 if (cell.basePreviewArea != null) cell.basePreviewArea.SetActive(true);
-                break;
-
-            case BaseOverlayType.Invalid:
-                if (cell.baseInvalid != null) cell.baseInvalid.SetActive(true);
                 break;
         }
     }
@@ -520,32 +492,17 @@ public class TileHighlighter : MonoBehaviour
         }
     }
 
-    float DirectionToZAngle(Vector2 dir)
-    {
-        if (dir.sqrMagnitude < 0.0001f) return 0f;
-        return Mathf.Atan2(dir.y, dir.x) * Mathf.Rad2Deg;
-    }
-
     // =========================================================
     // Helpers
     // =========================================================
 
-    void AddToSet(HashSet<Vector2Int> set, IEnumerable<Vector2Int> tiles)
-    {
-        if (tiles == null) return;
-
-        foreach (var t in tiles)
-            set.Add(t);
-    }
-
-    GameObject CreateChild(GameObject prefab, Transform parent, Vector3 localOffset, string childName)
+    GameObject CreateChild(GameObject prefab, Transform parent, Vector3 localPos, string name)
     {
         if (prefab == null) return null;
 
         var go = Instantiate(prefab, parent);
-        go.name = childName;
-        go.transform.localPosition = localOffset;
-        go.transform.localRotation = Quaternion.identity;
+        go.name = name;
+        go.transform.localPosition = localPos;
         go.SetActive(false);
         return go;
     }
@@ -560,15 +517,24 @@ public class TileHighlighter : MonoBehaviour
         list.Clear();
     }
 
+    void AddToSet(HashSet<Vector2Int> set, IEnumerable<Vector2Int> tiles)
+    {
+        if (tiles == null) return;
+        foreach (var t in tiles)
+            set.Add(t);
+    }
+
     Vector3 GetWorld(Vector2Int tile)
     {
-        if (grid == null)
-        {
-            if (debugLog)
-                Debug.LogWarning("[TileHighlighter] GridManager missing.");
-            return Vector3.zero;
-        }
+        return grid != null ? grid.GridToWorld(tile) : Vector3.zero;
+    }
 
-        return grid.GridToWorld(tile);
+    float DirectionToZAngle(Vector2 dir)
+    {
+        if (dir == Vector2.right) return 0f;
+        if (dir == Vector2.up) return 90f;
+        if (dir == Vector2.left) return 180f;
+        if (dir == Vector2.down) return 270f;
+        return 0f;
     }
 }

@@ -963,13 +963,21 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::TileHighlighter
   grid: {fileID: 1195764739}
-  moveTilePrefab: {fileID: 6754760730953624394, guid: 345dbe42f9a5c2140891b081a293613d, type: 3}
-  pathTilePrefab: {fileID: 8474163127165659146, guid: 426b427ace37d044eb540f229e0c8ad2, type: 3}
-  rangePrefab: {fileID: 4094983556775124581, guid: a1a24234cc2bb7643ab8fd78c75d7937, type: 3}
-  targetPrefab: {fileID: 9169441954277651116, guid: 3e5a3b31fd7a76645914ee3f8c36bc2e, type: 3}
-  ghostTilePrefab: {fileID: 8474163127165659146, guid: 426b427ace37d044eb540f229e0c8ad2, type: 3}
-  invalidTilePrefab: {fileID: 6754760730953624394, guid: 345dbe42f9a5c2140891b081a293613d, type: 3}
-  hazardPathPrefab: {fileID: 4094983556775124581, guid: a1a24234cc2bb7643ab8fd78c75d7937, type: 3}
+  moveTilePrefab: {fileID: 2547561043615734335, guid: b317153a44766f941b563c20e757f503, type: 3}
+  skillRangeTilePrefab: {fileID: 7971415546341332404, guid: 4c2668d7f561325408a3d5fef6ddea26, type: 3}
+  previewAreaTilePrefab: {fileID: 1776917299451187783, guid: affa67701f0c10f4792f3937ec3b8118, type: 3}
+  invalidTilePrefab: {fileID: 410821288610592428, guid: a09910dc8df0ac44fa5ab002661cf429, type: 3}
+  selectedFxPrefab: {fileID: 2441664175489196392, guid: e4ae683263bfafc45b72550784f3a434, type: 3}
+  targetFxPrefab: {fileID: 3812902537264089296, guid: 44eecea2d2b0a0f419a57fc65a49ae5f, type: 3}
+  warningFxPrefab: {fileID: 6519044173866930026, guid: 136c17ad210d3d0449f8bff5362e2db4, type: 3}
+  hazardFxPrefab: {fileID: 0}
+  ghostPrefab: {fileID: 8474163127165659146, guid: 426b427ace37d044eb540f229e0c8ad2, type: 3}
+  pathArrowPrefab: {fileID: 8842206626027692770, guid: 497ac51f9a531f54e83dda8e042e6fd6, type: 3}
+  overlayOffset: {x: 0, y: 0, z: -0.1}
+  fxOffset: {x: 0, y: 0, z: -0.2}
+  arrowOffset: {x: 0, y: 0, z: -0.25}
+  ghostOffset: {x: 0, y: 0.05, z: -0.3}
+  debugLog: 0
 --- !u!4 &1114685926
 Transform:
   m_ObjectHideFlags: 0
@@ -1408,6 +1416,10 @@ MonoBehaviour:
   - {fileID: 410415100}
   - {fileID: 1365342317}
   turnText: {fileID: 2123870233}
+  usePreviewActorGhost: 1
+  sourceActorPreviewAlpha: 0.4
+  previewActorOffset: {x: 0, y: 0, z: -0.35}
+  previewVisualRootName: Visual
   grid: {fileID: 1195764739}
 --- !u!4 &1438724835
 Transform:

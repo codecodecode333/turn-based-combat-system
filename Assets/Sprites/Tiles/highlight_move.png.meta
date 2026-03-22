@@ -1,10 +1,10 @@
 fileFormatVersion: 2
-guid: 4a47fe930bd91164a8fc9ef8bde4f20a
+guid: 7b44d82cec3a15b46aa1b6b61b35b147
 TextureImporter:
   internalIDToNameTable:
   - first:
-      213: 6453503670759812631
-    second: MoveHighlight_Red_0
+      213: -8883538012874189261
+    second: highlight_move_0
   externalObjects: {}
   serializedVersion: 13
   mipmaps:
@@ -100,13 +100,13 @@ TextureImporter:
     serializedVersion: 2
     sprites:
     - serializedVersion: 2
-      name: MoveHighlight_Red_0
+      name: highlight_move_0
       rect:
         serializedVersion: 2
-        x: 4
-        y: 2
-        width: 56
-        height: 28
+        x: 0
+        y: 0
+        width: 64
+        height: 32
       alignment: 0
       pivot: {x: 0, y: 0}
       border: {x: 0, y: 0, z: 0, w: 0}
@@ -115,8 +115,8 @@ TextureImporter:
       physicsShape: []
       tessellationDetail: -1
       bones: []
-      spriteID: 71e615c75637f8950800000000000000
-      internalID: 6453503670759812631
+      spriteID: 33654f98e3557b480800000000000000
+      internalID: -8883538012874189261
       vertices: []
       indices: 
       edges: []
@@ -135,7 +135,7 @@ TextureImporter:
     spriteCustomMetadata:
       entries: []
     nameFileIdTable:
-      MoveHighlight_Red_0: 6453503670759812631
+      highlight_move_0: -8883538012874189261
   mipmapLimitGroupName: 
   pSDRemoveMatte: 0
   userData: 

@@ -1,10 +1,10 @@
 fileFormatVersion: 2
-guid: 4ef46029643db7e46a330878fc4433ff
+guid: 2079c75ab7d0dbf47be17d171f226d23
 TextureImporter:
   internalIDToNameTable:
   - first:
-      213: -7080097815409701050
-    second: MoveHighlight_Blue_0
+      213: -6177155123267955439
+    second: fx_target_0
   externalObjects: {}
   serializedVersion: 13
   mipmaps:
@@ -100,7 +100,7 @@ TextureImporter:
     serializedVersion: 2
     sprites:
     - serializedVersion: 2
-      name: MoveHighlight_Blue_0
+      name: fx_target_0
       rect:
         serializedVersion: 2
         x: 4
@@ -115,8 +115,8 @@ TextureImporter:
       physicsShape: []
       tessellationDetail: -1
       bones: []
-      spriteID: 64f4c718c807ebd90800000000000000
-      internalID: -7080097815409701050
+      spriteID: 1151123b426564aa0800000000000000
+      internalID: -6177155123267955439
       vertices: []
       indices: 
       edges: []
@@ -135,7 +135,7 @@ TextureImporter:
     spriteCustomMetadata:
       entries: []
     nameFileIdTable:
-      MoveHighlight_Blue_0: -7080097815409701050
+      fx_target_0: -6177155123267955439
   mipmapLimitGroupName: 
   pSDRemoveMatte: 0
   userData: 
