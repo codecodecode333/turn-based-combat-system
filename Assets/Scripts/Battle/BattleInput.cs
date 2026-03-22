@@ -21,8 +21,13 @@ public class BattleInput : MonoBehaviour
     private InputAction pointerPosAction;
 
     // Hover state
-    private Vector2Int? lastHoverTile;      // AOE hover tile
-    private Vector2Int? lastHoverMoveTile;  // Move hover tile
+    // skill hover tile:
+    // - ClickTileAOE 중심 타일 hover
+    // - ClickSingle / All* / AutoNearestSingle에서도 "현재 커서 아래 타일" 전달용
+    private Vector2Int? lastHoverTile;
+
+    // Move hover tile
+    private Vector2Int? lastHoverMoveTile;
 
     void Awake()
     {
@@ -62,8 +67,9 @@ public class BattleInput : MonoBehaviour
 
             if (Keyboard.current.escapeKey.wasPressedThisFrame)
             {
-                ClearAOEHoverIfNeeded();
+                ClearSkillHoverIfNeeded();
                 ClearMoveHoverIfNeeded();
+                battle.ClearHoverSinglePreview();
                 battle.CancelPlanningStep();
                 return;
             }
@@ -71,8 +77,9 @@ public class BattleInput : MonoBehaviour
 
         if (Mouse.current != null && Mouse.current.rightButton.wasPressedThisFrame)
         {
-            ClearAOEHoverIfNeeded();
+            ClearSkillHoverIfNeeded();
             ClearMoveHoverIfNeeded();
+            battle.ClearHoverSinglePreview();
             battle.CancelPlanningStep();
             return;
         }
@@ -80,22 +87,25 @@ public class BattleInput : MonoBehaviour
         var mode = battle.InputMode;
         var skill = battle.SelectedSkill;
 
-        bool hoverAOE =
-            (battle.IsWaitingInput && !battle.IsBusy &&
-            mode == BattleController.PlayerInputMode.SkillPreview &&
-            skill != null &&
-            skill.targetMode == SkillTargetMode.ClickTileAOE &&
-            !battle.HasLockedAOETarget);
-
         bool hoverMove =
-            (battle.IsWaitingInput && !battle.IsBusy &&
-            mode == BattleController.PlayerInputMode.Move);
+            battle.IsWaitingInput && !battle.IsBusy &&
+            mode == BattleController.PlayerInputMode.Move;
 
-        // hover 조건이 둘 다 아니면, 남아있는 프리뷰를 확실히 정리
-        if (!hoverAOE && !hoverMove)
+        bool hoverSkillTile =
+            battle.IsWaitingInput && !battle.IsBusy &&
+            mode == BattleController.PlayerInputMode.SkillPreview &&
+            skill != null;
+
+        bool hoverSingleUnit =
+            hoverSkillTile &&
+            skill.targetMode == SkillTargetMode.ClickSingle;
+
+        // 어떤 hover도 안 쓰는 상태면 남은 preview 정리
+        if (!hoverMove && !hoverSkillTile && !hoverSingleUnit)
         {
-            ClearAOEHoverIfNeeded();
+            ClearSkillHoverIfNeeded();
             ClearMoveHoverIfNeeded();
+            battle.ClearHoverSinglePreview();
             return;
         }
 
@@ -105,7 +115,9 @@ public class BattleInput : MonoBehaviour
 
         var hits = Physics2D.RaycastAll(world, Vector2.zero, 0f, raycastMask);
 
+        Unit hitUnit = null;
         TileView hitTile = null;
+
         if (hits != null)
         {
             for (int i = 0; i < hits.Length; i++)
@@ -113,23 +125,31 @@ public class BattleInput : MonoBehaviour
                 var col = hits[i].collider;
                 if (!col) continue;
 
-                hitTile = col.GetComponentInParent<TileView>();
-                if (hitTile != null) break;
+                if (hitUnit == null)
+                    hitUnit = col.GetComponentInParent<Unit>();
+
+                if (hitTile == null)
+                    hitTile = col.GetComponentInParent<TileView>();
+
+                if (hitUnit != null && hitTile != null)
+                    break;
             }
         }
 
-        // 타일을 못 맞추면: 해당 hover만 정리
+        // 타일을 못 맞추면 각 hover 정리
         if (hitTile == null)
         {
-            if (hoverAOE) ClearAOEHoverIfNeeded();
+            if (hoverSkillTile) ClearSkillHoverIfNeeded();
             if (hoverMove) ClearMoveHoverIfNeeded();
+            battle.ClearHoverSinglePreview();
             return;
         }
 
         var gp = hitTile.GridPos;
 
-        // ---- AOE hover ----
-        if (hoverAOE)
+        // ---- Skill common tile hover ----
+        // 모든 스킬 모드에서 빈 타일 hover selected 용
+        if (hoverSkillTile)
         {
             if (!lastHoverTile.HasValue || lastHoverTile.Value != gp)
             {
@@ -139,7 +159,7 @@ public class BattleInput : MonoBehaviour
         }
         else
         {
-            ClearAOEHoverIfNeeded();
+            ClearSkillHoverIfNeeded();
         }
 
         // ---- Move hover ----
@@ -154,6 +174,29 @@ public class BattleInput : MonoBehaviour
         else
         {
             ClearMoveHoverIfNeeded();
+        }
+
+        // ---- ClickSingle unit hover ----
+        if (hoverSingleUnit)
+        {
+            battle.OnHoverUnit(hitUnit);
+        }
+        else
+        {
+            battle.ClearHoverSinglePreview();
+        }
+
+        if (debugLog)
+        {
+            Debug.Log(
+                $"[BattleInput Hover] mode={mode}, " +
+                $"skill={(skill ? skill.skillName : "null")}, " +
+                $"tile={gp}, " +
+                $"unit={(hitUnit ? hitUnit.name : "null")}, " +
+                $"hoverSkillTile={hoverSkillTile}, " +
+                $"hoverMove={hoverMove}, " +
+                $"hoverSingleUnit={hoverSingleUnit}"
+            );
         }
     }
 
@@ -180,22 +223,23 @@ public class BattleInput : MonoBehaviour
         if (pointerPosAction != null)
             pointerPosAction.Disable();
 
-        // ✅ 비활성화/씬전환에서도 잔상 확실히 정리
-        ClearAOEHoverIfNeeded(force: true);
+        // 비활성화 / 씬전환에서도 잔상 정리
+        ClearSkillHoverIfNeeded(force: true);
         ClearMoveHoverIfNeeded(force: true);
+
+        if (battle != null)
+            battle.ClearHoverSinglePreview();
     }
 
-    private void ClearAOEHoverIfNeeded(bool force = false)
+    private void ClearSkillHoverIfNeeded(bool force = false)
     {
-        if (!force && battle != null && battle.HasLockedAOETarget)
-            return;
-
         if (force || lastHoverTile.HasValue)
         {
             lastHoverTile = null;
             if (battle != null) battle.ClearHoverAOEPreview();
         }
     }
+
     private void ClearMoveHoverIfNeeded(bool force = false)
     {
         if (force || lastHoverMoveTile.HasValue)
@@ -212,14 +256,14 @@ public class BattleInput : MonoBehaviour
         Vector2 screen = pointerPosAction.ReadValue<Vector2>();
         Vector3 world = cam.ScreenToWorldPoint(new Vector3(screen.x, screen.y, 0f));
 
-        // ✅ 핵심: RaycastAll로 “유닛/타일 둘 다” 찾는다
+        // RaycastAll로 유닛/타일 둘 다 찾는다
         var hits = Physics2D.RaycastAll(world, Vector2.zero, 0f, raycastMask);
         if (hits == null || hits.Length == 0) return;
 
         Unit hitUnit = null;
         TileView hitTile = null;
 
-        // hits 순서는 보장되지 않으니, 그냥 둘 다 확보
+        // hits 순서는 보장되지 않으니 둘 다 확보
         for (int i = 0; i < hits.Length; i++)
         {
             var col = hits[i].collider;
@@ -235,26 +279,32 @@ public class BattleInput : MonoBehaviour
                 break;
         }
 
-        // ===== 우선순위 결정 =====
+        // 우선순위 결정
         // Move 모드: 타일 우선
         // SkillPreview + ClickTileAOE: 타일 우선
         // SkillPreview + ClickSingle: 유닛 우선
         var mode = battle.InputMode;
         var skill = battle.SelectedSkill;
 
-        bool isAOE = (mode == BattleController.PlayerInputMode.SkillPreview &&
-                      skill != null &&
-                      skill.targetMode == SkillTargetMode.ClickTileAOE);
+        bool isAOE =
+            mode == BattleController.PlayerInputMode.SkillPreview &&
+            skill != null &&
+            skill.targetMode == SkillTargetMode.ClickTileAOE;
 
-        bool unitFirst = (mode == BattleController.PlayerInputMode.SkillPreview &&
-                          skill != null &&
-                          skill.targetMode == SkillTargetMode.ClickSingle);
+        bool unitFirst =
+            mode == BattleController.PlayerInputMode.SkillPreview &&
+            skill != null &&
+            skill.targetMode == SkillTargetMode.ClickSingle;
 
         if (debugLog)
         {
-            Debug.Log($"[BattleInput] mode={mode}, skill={(skill ? skill.skillName : "null")}, " +
-                      $"unit={(hitUnit ? hitUnit.name : "null")}, tile={(hitTile ? hitTile.name : "null")}, " +
-                      $"AOE={isAOE}, unitFirst={unitFirst}");
+            Debug.Log(
+                $"[BattleInput Click] mode={mode}, " +
+                $"skill={(skill ? skill.skillName : "null")}, " +
+                $"unit={(hitUnit ? hitUnit.name : "null")}, " +
+                $"tile={(hitTile ? hitTile.name : "null")}, " +
+                $"AOE={isAOE}, unitFirst={unitFirst}"
+            );
         }
 
         if (unitFirst)
@@ -268,7 +318,8 @@ public class BattleInput : MonoBehaviour
         if (hitTile != null)
         {
             battle.OnTileClicked(hitTile.GridPos);
-            // ✅ AOE에서는 유닛 클릭을 “동시에” 처리하면 오작동할 수 있어서 여기서 종료
+
+            // AOE에서는 유닛 클릭을 동시에 처리하지 않음
             if (isAOE) return;
         }
 

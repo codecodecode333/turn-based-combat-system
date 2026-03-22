@@ -196,7 +196,14 @@ public class BattleController : MonoBehaviour
     public PlayerInputMode InputMode => inputMode;
     public SkillData SelectedSkill => selectedSkill;
     public Unit ActiveUnit => activeUnit;
+
+    // hoverTile:
+    // - ClickTileAOE에서는 중심 타일 hover
+    // - ClickSingle / All* / AutoNearestSingle에서도 "현재 커서 아래 타일" 공통 hover
     private Vector2Int? hoverTile = null;
+
+    // ClickSingle에서 유닛 hover 시 실제 preview 계산용
+    private Unit hoverSingleUnit = null;
 
     void Start()
     {
@@ -914,6 +921,41 @@ public class BattleController : MonoBehaviour
         reachableMoveCameFromCache = null;
     }
 
+    public void OnHoverUnit(Unit hovered)
+    {
+        if (battleEnded) return;
+        if (activeUnit == null || activeUnit.IsDead) return;
+        if (inputMode != PlayerInputMode.SkillPreview) return;
+        if (selectedSkill == null) return;
+        if (selectedSkill.targetMode != SkillTargetMode.ClickSingle) return;
+
+        if (hovered == null || hovered.IsDead)
+        {
+            if (hoverSingleUnit == null) return;
+            hoverSingleUnit = null;
+            RefreshPlanningVisuals();
+            return;
+        }
+
+        if (hoverSingleUnit == hovered) return;
+
+        hoverSingleUnit = hovered;
+        RefreshPlanningVisuals();
+    }
+
+    public void ClearHoverSinglePreview()
+    {
+        if (hoverSingleUnit == null)
+            return;
+
+        hoverSingleUnit = null;
+
+        if (busy || !waitingInput || battleEnded || activeUnit == null || activeUnit.IsDead)
+            return;
+
+        RefreshPlanningVisuals();
+    }
+
     public void OnUnitClicked(Unit clicked)
     {
         if (battleEnded) return;
@@ -993,89 +1035,34 @@ public class BattleController : MonoBehaviour
             return;
         }
 
+        hoverMoveTile = null;
         PlanMove(gridPos);
     }
     public void OnHoverTile(Vector2Int gridPos)
     {
-        // Hover는 "스킬 미리보기 + ClickTileAOE"에서만 동작
         if (battleEnded) return;
         if (activeUnit == null || activeUnit.IsDead) return;
         if (inputMode != PlayerInputMode.SkillPreview) return;
         if (selectedSkill == null) return;
-        if (selectedSkill.targetMode != SkillTargetMode.ClickTileAOE) return;
-        if (tileHighlighter == null) return;
 
         if (hoverTile.HasValue && hoverTile.Value == gridPos) return;
+
         hoverTile = gridPos;
-
-        tileHighlighter.ClearPreviewAreaTiles();
-        tileHighlighter.ClearTargetOverlay();
-        tileHighlighter.ClearSelectedTile();
-        ClearPreviewTargetIndicators();
-
-        // 모든 hover에서 selected-fx 표시
-        tileHighlighter.ShowSelectedTile(gridPos);
-
-        bool castable = CombatTargetResolver.IsPointCastable(
-            PlannedSkill,
-            PreviewPosition,
-            gridPos,
-            grid
-        );
-
-        if (!castable)
-        {
-            // invalid 삭제: selected-fx만 남기고 종료
-            return;
-        }
-
-        // AOE 전체 영역 = preview area
-        var aoeTiles = BuildManhattanDisk(gridPos, Mathf.Max(0, PlannedSkill.aoeRadius));
-        tileHighlighter.ShowPreviewAreaTiles(aoeTiles);
-
-        // 실제 적중 대상 분리
-        previewTargetUnits.Clear();
-        previewTargetUnits.AddRange(
-            CombatTargetResolver.ResolveTargetsFromPosition(
-                PlannedSkill,
-                activeUnit,
-                PreviewPosition,
-                GetCasterAllies(activeUnit),
-                GetCasterEnemies(activeUnit),
-                grid,
-                gridPos,
-                null
-            )
-        );
-
-        SplitPreviewTargetTiles(previewTargetUnits, activeUnit, PreviewPosition);
-
-        if (previewEnemyTiles.Count > 0)
-            tileHighlighter.ShowTargetTiles(previewEnemyTiles);
-
-        if (previewFriendlyFireTiles.Count > 0)
-            tileHighlighter.ShowFriendlyFireTiles(previewFriendlyFireTiles);
-
-        ApplyPreviewTargetIndicators(previewTargetUnits, activeUnit, PreviewPosition);
+        RefreshPlanningVisuals();
     }
 
     public void ClearHoverAOEPreview()
     {
+        if (!hoverTile.HasValue)
+            return;
+
         hoverTile = null;
 
-        if (tileHighlighter != null)
-        {
-            tileHighlighter.ClearPreviewAreaTiles();
-            tileHighlighter.ClearTargetOverlay();
-            tileHighlighter.ClearSelectedTile();
-        }
+        if (busy || !waitingInput || battleEnded || activeUnit == null || activeUnit.IsDead)
+            return;
 
-        ClearPreviewTargetIndicators();
-
-        // locked preview / move preview 다시 복원
         RefreshPlanningVisuals();
     }
-
     List<Vector2Int> BuildManhattanDisk(Vector2Int center, int radius)
     {
         var list = new List<Vector2Int>( (radius * 2 + 1) * (radius * 2 + 1) );
@@ -1097,72 +1084,32 @@ public class BattleController : MonoBehaviour
         if (activeUnit == null || activeUnit.IsDead) return;
         if (inputMode != PlayerInputMode.Move) return;
         if (!activeUnit.CanMove()) return;
-        if (tileHighlighter == null) return;
 
-        EnsureReachableMoveCacheCurrent();
-
-        if (reachableMoveCache == null || reachableMoveCameFromCache == null)
-        {
-            var data = grid.GetReachableData(activeUnit, GetCurrentMoveRange(activeUnit));
-            reachableMoveCache = data.cost;
-            reachableMoveCameFromCache = data.cameFrom;
-        }
-
-        tileHighlighter.ClearPath();
-        tileHighlighter.ClearHoverHazardPath();
-        tileHighlighter.ClearSelectedTile();
-
-        // 모든 hover에서 selected-fx 표시
-        tileHighlighter.ShowSelectedTile(gridPos);
-
-        if (!reachableMoveCache.ContainsKey(gridPos))
-        {
-            hoverMoveTile = null;
-            RefreshPlanningVisuals();
-            return;
-        }
-
-        if (gridPos == activeUnit.GridPos)
-        {
-            hoverMoveTile = null;
-            RefreshPlanningVisuals();
-            return;
-        }
+        // move가 이미 계획된 뒤에는 hover preview를 더 이상 갱신하지 않음
+        if (PlannedMoveTile.HasValue) return;
 
         if (hoverMoveTile.HasValue && hoverMoveTile.Value == gridPos) return;
+
+        // 핵심:
+        // 이제는 유효/무효와 상관없이 hover 위치 자체는 저장한다.
+        // selected는 모든 hover 타일에 뜨고,
+        // actionable/path는 RefreshPlanningVisuals()에서 유효할 때만 뜬다.
         hoverMoveTile = gridPos;
-
-        var path = grid.ReconstructPath(activeUnit.GridPos, gridPos, reachableMoveCameFromCache);
-
-        if (path != null && path.Count > 0)
-        {
-            tileHighlighter.ShowPathTiles(path);
-
-            BuildPreviewHazardTiles(path);
-            if (previewHazardTiles.Count > 0)
-                tileHighlighter.ShowHoverHazardPathTiles(previewHazardTiles);
-        }
-    }
+        RefreshPlanningVisuals();
+    }               
 
     public void ClearHoverMovePathPreview()
     {
+        if (!hoverMoveTile.HasValue)
+            return;
+
         hoverMoveTile = null;
 
-        if (tileHighlighter != null)
-        {
-            tileHighlighter.ClearPath();
-            tileHighlighter.ClearHoverHazardPath();
-            tileHighlighter.ClearSelectedTile();
-        }
-
-        // hover 프리뷰만 지우고 끝내면
-        // planned move / planned skill 시각 정보가 같이 사라질 수 있으므로
-        // 현재 계획 상태를 다시 복원
         if (busy || !waitingInput || battleEnded || activeUnit == null || activeUnit.IsDead)
             return;
 
         RefreshPlanningVisuals();
-    }
+    }                                   
 
     private Vector2Int PreviewPosition
     {
@@ -1176,13 +1123,14 @@ public class BattleController : MonoBehaviour
     private bool HasPlannedTarget =>
         PlannedClickedTile.HasValue || PlannedClickedUnit != null;
 
-    void RefreshPlanningVisuals()
+        void RefreshPlanningVisuals()
     {
         if (tileHighlighter == null || activeUnit == null || activeUnit.IsDead || grid == null)
             return;
 
         tileHighlighter.ClearAll();
         ClearPreviewTargetIndicators();
+        tileHighlighter.ClearActionableTiles();
 
         // -------------------------
         // Move base overlay
@@ -1203,13 +1151,13 @@ public class BattleController : MonoBehaviour
         }
 
         // -------------------------
-        // Planned move: ghost + selected + planned path
+        // Planned move: selected + planned path
         // -------------------------
         if (PlannedMoveTile.HasValue)
         {
             var moveTile = PlannedMoveTile.Value;
 
-            tileHighlighter.ClearGhostTile(); // 안전하게 정리
+            tileHighlighter.ClearGhostTile();
             tileHighlighter.ShowSelectedTile(moveTile);
 
             if (reachableMoveCameFromCache != null &&
@@ -1230,22 +1178,175 @@ public class BattleController : MonoBehaviour
         // -------------------------
         // Skill preview base overlay
         // -------------------------
-        // Skill preview base overlay
         if (inputMode == PlayerInputMode.SkillPreview && PlannedSkill != null)
         {
             var castableTiles = GetCastableTilesForPreview(PlannedSkill, PreviewPosition);
             tileHighlighter.ShowRangeTiles(castableTiles);
-
-
-            // 2) 기본은 실제 범위 없음
             tileHighlighter.ClearPreviewAreaTiles();
 
-            // ClickSingle locked preview
-            if (PlannedSkill.targetMode == SkillTargetMode.ClickSingle && PlannedClickedUnit != null)
+            // 모든 스킬 공통: 빈 타일 hover면 selected
+            // 단, explicit target lock이 걸린 상태에서는 locked preview를 우선
+            if (hoverTile.HasValue && !HasPlannedTarget)
             {
-                previewTargetUnits.Clear();
-                previewTargetUnits.AddRange(
-                    CombatTargetResolver.ResolveTargetsFromPosition(
+                tileHighlighter.ShowSelectedTile(hoverTile.Value);
+            }
+
+            switch (PlannedSkill.targetMode)
+            {
+                // =====================================
+                // ClickSingle
+                // =====================================
+                case SkillTargetMode.ClickSingle:
+                {
+                    // locked target preview
+                    if (PlannedClickedUnit != null && !PlannedClickedUnit.IsDead)
+                    {
+                        Vector2Int lockedPos = (PlannedClickedUnit == activeUnit) ? PreviewPosition : PlannedClickedUnit.GridPos;
+                        tileHighlighter.ShowSelectedTile(lockedPos);
+
+                        var resolved = CombatTargetResolver.ResolveTargetsFromPosition(
+                            PlannedSkill,
+                            activeUnit,
+                            PreviewPosition,
+                            GetCasterAllies(activeUnit),
+                            GetCasterEnemies(activeUnit),
+                            grid,
+                            null,
+                            PlannedClickedUnit
+                        );
+
+                        ShowResolvedSkillPreview(
+                            resolved,
+                            activeUnit,
+                            PreviewPosition,
+                            showPreviewArea: true,
+                            showActionable: true
+                        );
+                    }
+                    // hover target preview
+                    else if (hoverSingleUnit != null && !hoverSingleUnit.IsDead)
+                    {
+                        var resolved = CombatTargetResolver.ResolveTargetsFromPosition(
+                            PlannedSkill,
+                            activeUnit,
+                            PreviewPosition,
+                            GetCasterAllies(activeUnit),
+                            GetCasterEnemies(activeUnit),
+                            grid,
+                            null,
+                            hoverSingleUnit
+                        );
+
+                        ShowResolvedSkillPreview(
+                            resolved,
+                            activeUnit,
+                            PreviewPosition,
+                            showPreviewArea: true,
+                            showActionable: true
+                        );
+                    }
+
+                    break;
+                }
+
+                // =====================================
+                // ClickTileAOE
+                // =====================================
+                case SkillTargetMode.ClickTileAOE:
+                {
+                    // locked target preview
+                    if (PlannedClickedTile.HasValue)
+                    {
+                        Vector2Int center = PlannedClickedTile.Value;
+
+                        tileHighlighter.ShowSelectedTile(center);
+                        tileHighlighter.ShowActionableTiles(new[] { center });
+
+                        var aoeTiles = BuildManhattanDisk(center, Mathf.Max(0, PlannedSkill.aoeRadius));
+                        tileHighlighter.ShowPreviewAreaTiles(aoeTiles);
+
+                        var resolved = CombatTargetResolver.ResolveTargetsFromPosition(
+                            PlannedSkill,
+                            activeUnit,
+                            PreviewPosition,
+                            GetCasterAllies(activeUnit),
+                            GetCasterEnemies(activeUnit),
+                            grid,
+                            center,
+                            null
+                        );
+
+                        previewTargetUnits.Clear();
+                        previewTargetUnits.AddRange(resolved);
+
+                        SplitPreviewTargetTiles(previewTargetUnits, activeUnit, PreviewPosition);
+
+                        if (previewEnemyTiles.Count > 0)
+                            tileHighlighter.ShowTargetTiles(previewEnemyTiles);
+
+                        if (previewFriendlyFireTiles.Count > 0)
+                            tileHighlighter.ShowFriendlyFireTiles(previewFriendlyFireTiles);
+
+                        ApplyPreviewTargetIndicators(previewTargetUnits, activeUnit, PreviewPosition);
+                    }
+                    // hover preview
+                    else if (hoverTile.HasValue)
+                    {
+                        Vector2Int center = hoverTile.Value;
+
+                        bool castable = CombatTargetResolver.IsPointCastable(
+                            PlannedSkill,
+                            PreviewPosition,
+                            center,
+                            grid
+                        );
+
+                        if (castable)
+                        {
+                            tileHighlighter.ShowActionableTiles(new[] { center });
+
+                            var aoeTiles = BuildManhattanDisk(center, Mathf.Max(0, PlannedSkill.aoeRadius));
+                            tileHighlighter.ShowPreviewAreaTiles(aoeTiles);
+
+                            var resolved = CombatTargetResolver.ResolveTargetsFromPosition(
+                                PlannedSkill,
+                                activeUnit,
+                                PreviewPosition,
+                                GetCasterAllies(activeUnit),
+                                GetCasterEnemies(activeUnit),
+                                grid,
+                                center,
+                                null
+                            );
+
+                            previewTargetUnits.Clear();
+                            previewTargetUnits.AddRange(resolved);
+
+                            SplitPreviewTargetTiles(previewTargetUnits, activeUnit, PreviewPosition);
+
+                            if (previewEnemyTiles.Count > 0)
+                                tileHighlighter.ShowTargetTiles(previewEnemyTiles);
+
+                            if (previewFriendlyFireTiles.Count > 0)
+                                tileHighlighter.ShowFriendlyFireTiles(previewFriendlyFireTiles);
+
+                            ApplyPreviewTargetIndicators(previewTargetUnits, activeUnit, PreviewPosition);
+                        }
+                    }
+
+                    break;
+                }
+
+                // =====================================
+                // Auto / All* 계열
+                // =====================================
+                case SkillTargetMode.AutoNearestSingle:
+                case SkillTargetMode.AllEnemiesInRange:
+                case SkillTargetMode.AllEnemiesAnywhere:
+                case SkillTargetMode.AllAlliesInRange:
+                case SkillTargetMode.AllAlliesAnywhere:
+                {
+                    var resolved = CombatTargetResolver.ResolveTargetsFromPosition(
                         PlannedSkill,
                         activeUnit,
                         PreviewPosition,
@@ -1253,92 +1354,55 @@ public class BattleController : MonoBehaviour
                         GetCasterEnemies(activeUnit),
                         grid,
                         null,
-                        PlannedClickedUnit
-                    )
-                );
+                        null
+                    );
 
-                SplitPreviewTargetTiles(previewTargetUnits, activeUnit, PreviewPosition);
-
-                // 단일 타겟은 실제 범위를 "타겟 위치 타일"로 연주황 표시 가능
-                var singlePreviewTiles = new HashSet<Vector2Int>();
-                for (int i = 0; i < previewTargetUnits.Count; i++)
-                {
-                    var u = previewTargetUnits[i];
-                    if (u == null || u.IsDead) continue;
-
-                    Vector2Int pos = (u == activeUnit) ? PreviewPosition : u.GridPos;
-                    singlePreviewTiles.Add(pos);
-                }
-
-                if (singlePreviewTiles.Count > 0)
-                    tileHighlighter.ShowPreviewAreaTiles(singlePreviewTiles);
-
-                if (previewEnemyTiles.Count > 0)
-                    tileHighlighter.ShowTargetTiles(previewEnemyTiles);
-
-                if (previewFriendlyFireTiles.Count > 0)
-                    tileHighlighter.ShowFriendlyFireTiles(previewFriendlyFireTiles);
-
-                ApplyPreviewTargetIndicators(previewTargetUnits, activeUnit, PreviewPosition);
-            }
-
-            // ClickTileAOE locked preview
-            if (PlannedSkill.targetMode == SkillTargetMode.ClickTileAOE && PlannedClickedTile.HasValue)
-            {
-                Vector2Int center = PlannedClickedTile.Value;
-
-                // 실제 스킬 범위는 연주황
-                var aoeTiles = BuildManhattanDisk(center, Mathf.Max(0, PlannedSkill.aoeRadius));
-                tileHighlighter.ShowPreviewAreaTiles(aoeTiles);
-
-                // 중심 타일은 selected fx
-                tileHighlighter.ShowSelectedTile(center);
-
-                previewTargetUnits.Clear();
-                previewTargetUnits.AddRange(
-                    CombatTargetResolver.ResolveTargetsFromPosition(
-                        PlannedSkill,
+                    ShowResolvedSkillPreview(
+                        resolved,
                         activeUnit,
                         PreviewPosition,
-                        GetCasterAllies(activeUnit),
-                        GetCasterEnemies(activeUnit),
-                        grid,
-                        center,
-                        null
-                    )
-                );
+                        showPreviewArea: true,
+                        showActionable: true
+                    );
 
-                SplitPreviewTargetTiles(previewTargetUnits, activeUnit, PreviewPosition);
-
-                if (previewEnemyTiles.Count > 0)
-                    tileHighlighter.ShowTargetTiles(previewEnemyTiles);
-
-                if (previewFriendlyFireTiles.Count > 0)
-                    tileHighlighter.ShowFriendlyFireTiles(previewFriendlyFireTiles);
-
-                ApplyPreviewTargetIndicators(previewTargetUnits, activeUnit, PreviewPosition);
+                    break;
+                }
             }
         }
 
         // -------------------------
         // Move hover path preview
         // -------------------------
-        if (hoverMoveTile.HasValue &&
-            inputMode == PlayerInputMode.Move &&
-            !hasMovedThisTurn &&
-            reachableMoveCameFromCache != null &&
-            reachableMoveCameFromCache.ContainsKey(hoverMoveTile.Value))
+        if (inputMode == PlayerInputMode.Move && hoverMoveTile.HasValue && !PlannedMoveTile.HasValue)
         {
-            var hoverPath = grid.ReconstructPath(activeUnit.GridPos, hoverMoveTile.Value, reachableMoveCameFromCache);
-            if (hoverPath != null && hoverPath.Count > 0)
-            {
-                tileHighlighter.ShowPathTiles(hoverPath);
+            Vector2Int hover = hoverMoveTile.Value;
 
-                BuildPreviewHazardTiles(hoverPath);
-                if (previewHazardTiles.Count > 0)
-                    tileHighlighter.ShowHoverHazardPathTiles(previewHazardTiles);
+            tileHighlighter.ShowSelectedTile(hover);
+
+            bool isValidMoveHover =
+                !hasMovedThisTurn &&
+                activeUnit.CanMove() &&
+                reachableMoveCache != null &&
+                reachableMoveCameFromCache != null &&
+                reachableMoveCache.ContainsKey(hover) &&
+                hover != activeUnit.GridPos;
+
+            if (isValidMoveHover)
+            {
+                tileHighlighter.ShowActionableTiles(new[] { hover });
+
+                var hoverPath = grid.ReconstructPath(activeUnit.GridPos, hover, reachableMoveCameFromCache);
+                if (hoverPath != null && hoverPath.Count > 0)
+                {
+                    tileHighlighter.ShowPathTiles(hoverPath);
+
+                    BuildPreviewHazardTiles(hoverPath);
+                    if (previewHazardTiles.Count > 0)
+                        tileHighlighter.ShowHoverHazardPathTiles(previewHazardTiles);
+                }
             }
         }
+
         UpdatePreviewGhostPresentation();
     }
     
@@ -1676,6 +1740,7 @@ public class BattleController : MonoBehaviour
             skillAction.clickedUnit = null;
         }
 
+        hoverSingleUnit = null;
         ClearPreviewTargetIndicators();
         ClearHoverAOEPreview();
     }
@@ -1712,6 +1777,7 @@ public class BattleController : MonoBehaviour
         selectedSkillIndex = -1;
         hoverMoveTile = null;
         hoverTile = null;
+        hoverSingleUnit = null;
 
         if (tileHighlighter) tileHighlighter.ClearGhostTile();
 
@@ -1720,7 +1786,7 @@ public class BattleController : MonoBehaviour
         ClearHoverMovePathPreview();
         ClearPreviewGhostPresentation();
     }
-    
+
     void ApplyPreviewTargetIndicators(List<Unit> targets, Unit caster, Vector2Int casterPreviewPos)
     {
         ClearPreviewTargetIndicators();
@@ -1962,6 +2028,50 @@ public class BattleController : MonoBehaviour
         }
     }
 
+    HashSet<Vector2Int> BuildResolvedTargetTileSet(List<Unit> resolvedTargets, Unit caster, Vector2Int casterPreviewPos)
+    {
+        var set = new HashSet<Vector2Int>();
+
+        if (resolvedTargets == null)
+            return set;
+
+        for (int i = 0; i < resolvedTargets.Count; i++)
+        {
+            var u = resolvedTargets[i];
+            if (u == null || u.IsDead) continue;
+
+            Vector2Int pos = (u == caster) ? casterPreviewPos : u.GridPos;
+            set.Add(pos);
+        }
+
+        return set;
+    }
+
+    void ShowResolvedSkillPreview(List<Unit> resolvedTargets, Unit caster, Vector2Int casterPreviewPos, bool showPreviewArea, bool showActionable)
+    {
+        previewTargetUnits.Clear();
+
+        if (resolvedTargets != null)
+            previewTargetUnits.AddRange(resolvedTargets);
+
+        SplitPreviewTargetTiles(previewTargetUnits, caster, casterPreviewPos);
+
+        var actualTiles = BuildResolvedTargetTileSet(previewTargetUnits, caster, casterPreviewPos);
+
+        if (showPreviewArea && actualTiles.Count > 0)
+            tileHighlighter.ShowPreviewAreaTiles(actualTiles);
+
+        if (previewEnemyTiles.Count > 0)
+            tileHighlighter.ShowTargetTiles(previewEnemyTiles);
+
+        if (previewFriendlyFireTiles.Count > 0)
+            tileHighlighter.ShowFriendlyFireTiles(previewFriendlyFireTiles);
+
+        ApplyPreviewTargetIndicators(previewTargetUnits, caster, casterPreviewPos);
+
+        if (showActionable && actualTiles.Count > 0)
+            tileHighlighter.ShowActionableTiles(actualTiles);
+    }
     List<Vector2Int> GetCastableTilesForPreview(SkillData skill, Vector2Int fromPos)
     {
         var result = new List<Vector2Int>();

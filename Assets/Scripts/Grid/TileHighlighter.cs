@@ -16,6 +16,7 @@ public class TileHighlighter : MonoBehaviour
     {
         None = 0,
         Selected = 1 << 0,
+        Actionable = 1 << 1,
         TargetHit = 1 << 1,
         FriendlyFire = 1 << 2,
         Hazard = 1 << 3
@@ -31,6 +32,7 @@ public class TileHighlighter : MonoBehaviour
         public GameObject basePreviewArea;
 
         public GameObject selectedFx;
+        public GameObject actionableFx;
         public GameObject targetFx;
         public GameObject warningFx;
         public GameObject hazardFx;
@@ -50,6 +52,7 @@ public class TileHighlighter : MonoBehaviour
         public void HideAllFx()
         {
             if (selectedFx != null) selectedFx.SetActive(false);
+            if (actionableFx != null) actionableFx.SetActive(false);
             if (targetFx != null) targetFx.SetActive(false);
             if (warningFx != null) warningFx.SetActive(false);
             if (hazardFx != null) hazardFx.SetActive(false);
@@ -66,6 +69,7 @@ public class TileHighlighter : MonoBehaviour
 
     [Header("FX Prefabs")]
     public GameObject selectedFxPrefab;
+    public GameObject actionableFxPrefab;
     public GameObject targetFxPrefab;
     public GameObject warningFxPrefab;         // friendly fire
     public GameObject hazardFxPrefab;
@@ -94,6 +98,7 @@ public class TileHighlighter : MonoBehaviour
     // FX State
     // =========================
     readonly HashSet<Vector2Int> selectedFxTiles = new HashSet<Vector2Int>();
+    readonly HashSet<Vector2Int> actionableFxTiles = new HashSet<Vector2Int>();
     readonly HashSet<Vector2Int> targetFxTiles = new HashSet<Vector2Int>();
     readonly HashSet<Vector2Int> warningFxTiles = new HashSet<Vector2Int>();
     readonly HashSet<Vector2Int> hazardFxTiles = new HashSet<Vector2Int>();
@@ -217,6 +222,19 @@ public class TileHighlighter : MonoBehaviour
         RebuildVisuals();
     }
 
+    public void ShowActionableTiles(IEnumerable<Vector2Int> tiles)
+    {
+        actionableFxTiles.Clear();
+        AddToSet(actionableFxTiles, tiles);
+        RebuildVisuals();
+    }
+
+    public void ClearActionableTiles()
+    {
+        actionableFxTiles.Clear();
+        RebuildVisuals();
+    }
+
     // =========================================================
     // Public API - Path / Hazard Path / Ghost
     // =========================================================
@@ -297,6 +315,7 @@ public class TileHighlighter : MonoBehaviour
         previewAreaTiles.Clear();
 
         selectedFxTiles.Clear();
+        actionableFxTiles.Clear();
         targetFxTiles.Clear();
         warningFxTiles.Clear();
         hazardFxTiles.Clear();
@@ -329,6 +348,7 @@ public class TileHighlighter : MonoBehaviour
         TileFxFlags fx = TileFxFlags.None;
 
         if (selectedFxTiles.Contains(tile)) fx |= TileFxFlags.Selected;
+        if (actionableFxTiles.Contains(tile)) fx |= TileFxFlags.Actionable;
         if (targetFxTiles.Contains(tile)) fx |= TileFxFlags.TargetHit;
         if (warningFxTiles.Contains(tile)) fx |= TileFxFlags.FriendlyFire;
         if (hazardFxTiles.Contains(tile)) fx |= TileFxFlags.Hazard;
@@ -345,6 +365,7 @@ public class TileHighlighter : MonoBehaviour
         allTiles.UnionWith(previewAreaTiles);
 
         allTiles.UnionWith(selectedFxTiles);
+        allTiles.UnionWith(actionableFxTiles);
         allTiles.UnionWith(targetFxTiles);
         allTiles.UnionWith(warningFxTiles);
         allTiles.UnionWith(hazardFxTiles);
@@ -388,6 +409,7 @@ public class TileHighlighter : MonoBehaviour
 
         Vector3 localFxOffset = fxOffset - overlayOffset;
         cell.selectedFx = CreateChild(selectedFxPrefab, root.transform, localFxOffset, "FX_Selected");
+        cell.actionableFx = CreateChild(actionableFxPrefab, root.transform, localFxOffset, "FX_Actionable");
         cell.targetFx = CreateChild(targetFxPrefab, root.transform, localFxOffset, "FX_Target");
         cell.warningFx = CreateChild(warningFxPrefab, root.transform, localFxOffset, "FX_FriendlyFire");
         cell.hazardFx = CreateChild(hazardFxPrefab, root.transform, localFxOffset, "FX_Hazard");
@@ -426,6 +448,9 @@ public class TileHighlighter : MonoBehaviour
 
         if ((fx & TileFxFlags.Selected) != 0 && cell.selectedFx != null)
             cell.selectedFx.SetActive(true);
+
+        if ((fx & TileFxFlags.Actionable) != 0 && cell.actionableFx != null)
+        cell.actionableFx.SetActive(true);
 
         if ((fx & TileFxFlags.TargetHit) != 0 && cell.targetFx != null)
             cell.targetFx.SetActive(true);
