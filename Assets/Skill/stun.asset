@@ -10,16 +10,18 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: fea434eed2669bb45a0502daf44b9525, type: 3}
-  m_Name: Burn_SingleEnemy
+  m_Name: stun
   m_EditorClassIdentifier: Assembly-CSharp::SkillData
-  skillName: Burn_SingleEnemy
+  skillName: all
   animationTrigger: triggerAttack
   timing: 1
   effects:
+  - {fileID: 11400000, guid: 78878f54a82b04f43ba6d519d42abdd1, type: 2}
   - {fileID: 11400000, guid: 38e5bb3a9365a9c4da770ea93d9d5c10, type: 2}
+  - {fileID: 11400000, guid: 1f36a5c4cc0e4534ca9c6ef85e717b0b, type: 2}
   targetMode: 1
   aoeRadius: 0
-  minRange: 1
-  maxRange: 3
-  requiresLineOfSight: 1
+  minRange: 0
+  maxRange: 5
+  requiresLineOfSight: 0
   costAP: 1

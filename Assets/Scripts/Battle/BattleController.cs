@@ -32,6 +32,23 @@ public class BattleController : MonoBehaviour
     public Button[] skillButtons;      // size 3
     public TMP_Text turnText;
 
+    [Header("AP UX")]
+    public Color skillButtonNormalTextColor = Color.white;
+    public Color skillButtonNoApTextColor = new Color(1f, 0.45f, 0.45f, 1f);
+    public Color skillButtonDisabledTextColor = new Color(0.65f, 0.65f, 0.65f, 1f);
+
+    public Color skillButtonNormalBgColor = Color.white;
+    public Color skillButtonNoApBgColor = new Color(0.45f, 0.35f, 0.35f, 1f);
+    public Color skillButtonDisabledBgColor = new Color(0.45f, 0.45f, 0.45f, 1f);
+
+    public float apButtonShakeDuration = 0.14f;
+    public float apButtonShakeMagnitude = 10f;
+    public string apInsufficientMessage = "AP 부족";
+
+    bool skillButtonsInputEnabled = false;
+    Coroutine apInsufficientTextCo;
+    readonly Dictionary<Button, Coroutine> buttonShakeCos = new Dictionary<Button, Coroutine>();
+
     [Header("Preview Actor")]
     public bool usePreviewActorGhost = true;
     [Range(0f, 1f)] public float sourceActorPreviewAlpha = 0.4f;
@@ -229,12 +246,15 @@ public class BattleController : MonoBehaviour
             if (label != null)
             {
                 var s = (pool != null && idx < pool.Length) ? pool[idx] : null;
-                label.text = s != null ? s.skillName : "-";
+
+                if (s != null)
+                    label.text = $"{s.skillName} ({s.costAP})";
+                else
+                    label.text = "-";
             }
-            // 차후 tooltip/hud 설명용
-            // string summary = s != null ? SkillEffectFormatter.BuildSkillSummary(s) : "";
-            skillButtons[i].interactable = (pool != null && idx < pool.Length && pool[idx] != null);
         }
+
+        RefreshSkillButtonStates();
     }
 
     void StartBattle()
@@ -274,7 +294,6 @@ public class BattleController : MonoBehaviour
         }
         
         BuildTurnOrder();
-        UpdateTurnOrderHud();
         turnIndex = 0;
         StartNextTurn();
     }
@@ -302,8 +321,6 @@ public class BattleController : MonoBehaviour
             if (sp != 0) return sp;
             return a.GetInstanceID().CompareTo(b.GetInstanceID());
         });
-        UpdateTurnOrderHud();
-
     }
 
     void StartNextTurn()
@@ -390,6 +407,7 @@ public class BattleController : MonoBehaviour
 
             SetupSkillButtons();
             SetSkillButtonsInteractable(true);
+            RefreshSkillButtonStates();
 
             RebuildReachableMoveCache();
             inputMode = PlayerInputMode.Move;
@@ -437,6 +455,7 @@ public class BattleController : MonoBehaviour
         }
         turnIndex++;
         StartNextTurn();
+        RefreshSkillButtonStates();
     }
 
     private void ApplyTileHazardOnTurnStart(Unit unit)
@@ -493,7 +512,11 @@ public class BattleController : MonoBehaviour
         if (skill == null) return;
 
         if (!activeUnit.CanPayAP(skill.costAP))
+        {
+            TriggerAPInsufficientFeedback(skillIndex);
+            RefreshSkillButtonStates();
             return;
+        }
 
         if (PlannedSkill == skill && PlannedSkillIndex == skillIndex)
         {
@@ -554,6 +577,9 @@ public class BattleController : MonoBehaviour
             onComplete?.Invoke();
             yield break;
         }
+
+        RefreshSkillButtonStates();
+        RefreshActiveUnitHud();
 
         bool hitDone = false;
         bool endDone = false;
@@ -639,10 +665,9 @@ public class BattleController : MonoBehaviour
 
     void SetSkillButtonsInteractable(bool v)
     {
-        if (skillButtons == null) return;
-        foreach (var b in skillButtons)
-            if (b != null) b.interactable = v;
-    }   
+        skillButtonsInputEnabled = v;
+        RefreshSkillButtonStates();
+    } 
 
     Unit ChooseFirstAlive(List<Unit> list)
     {
@@ -652,18 +677,6 @@ public class BattleController : MonoBehaviour
         return null;
     }
 
-    void UpdateTurnOrderHud()
-    {
-        for (int i = 0; i < turnOrder.Count; i++)
-        {
-            var u = turnOrder[i];
-            if (u == null || u.IsDead) continue;
-
-            var hud = u.GetComponentInChildren<UnitHud>();
-            if (hud != null)
-                hud.SetTurnInfo($"#{i+1}  SPD {u.speed}");
-        }
-    }
     Unit ChooseNearestInRange(Unit caster, List<Unit> candidates, int minR, int maxR)
     {
         Unit best = null;
@@ -1601,6 +1614,7 @@ public class BattleController : MonoBehaviour
             busy = false;
             waitingInput = true;
             SetSkillButtonsInteractable(true);
+            RefreshSkillButtonStates();
 
             RefreshPlanningVisuals();
             yield break;
@@ -2331,5 +2345,149 @@ public class BattleController : MonoBehaviour
     {
         c.a = 1f;
         return c;
+    }
+
+    void RefreshSkillButtonStates()
+    {
+        if (skillButtons == null) return;
+
+        var pool = GetSkillPoolFor(activeUnit);
+
+        for (int i = 0; i < skillButtons.Length; i++)
+        {
+            var button = skillButtons[i];
+            if (button == null) continue;
+
+            var label = button.GetComponentInChildren<TMP_Text>();
+            var image = button.GetComponent<Image>();
+
+            SkillData skill = (pool != null && i < pool.Length) ? pool[i] : null;
+
+            bool hasSkill = skill != null;
+            bool hasAP = hasSkill && activeUnit != null && activeUnit.CanPayAP(skill.costAP);
+
+            // 클릭 자체는 가능하게 두고, 전역 잠금일 때만 막는다.
+            button.interactable = skillButtonsInputEnabled && hasSkill;
+
+            if (!hasSkill)
+            {
+                if (label != null) label.color = skillButtonDisabledTextColor;
+                if (image != null) image.color = skillButtonDisabledBgColor;
+                continue;
+            }
+
+            if (!skillButtonsInputEnabled)
+            {
+                if (label != null) label.color = skillButtonDisabledTextColor;
+                if (image != null) image.color = skillButtonDisabledBgColor;
+                continue;
+            }
+
+            if (hasAP)
+            {
+                if (label != null) label.color = skillButtonNormalTextColor;
+                if (image != null) image.color = skillButtonNormalBgColor;
+            }
+            else
+            {
+                if (label != null) label.color = skillButtonNoApTextColor;
+                if (image != null) image.color = skillButtonNoApBgColor;
+            }
+        }
+
+        RefreshActiveUnitHud();
+    }
+
+    void RefreshActiveUnitHud()
+    {
+        if (activeUnit == null) return;
+
+        var hud = activeUnit.GetComponentInChildren<UnitHud>(true);
+        if (hud != null)
+            hud.Refresh();
+    }
+
+    void TriggerAPInsufficientFeedback(int skillIndex)
+    {
+        ShowTemporaryTurnText(apInsufficientMessage);
+
+        if (skillButtons != null &&
+            skillIndex >= 0 &&
+            skillIndex < skillButtons.Length &&
+            skillButtons[skillIndex] != null)
+        {
+            ShakeButton(skillButtons[skillIndex]);
+        }
+
+        if (activeUnit != null)
+        {
+            var hud = activeUnit.GetComponentInChildren<UnitHud>(true);
+            if (hud != null)
+                hud.PulseAPInsufficient();
+        }
+    }
+
+    void ShowTemporaryTurnText(string msg)
+    {
+        if (turnText == null) return;
+
+        if (apInsufficientTextCo != null)
+            StopCoroutine(apInsufficientTextCo);
+
+        apInsufficientTextCo = StartCoroutine(CoShowTemporaryTurnText(msg, 0.6f));
+    }
+
+    IEnumerator CoShowTemporaryTurnText(string msg, float duration)
+    {
+        if (turnText == null) yield break;
+
+        string prev = turnText.text;
+        turnText.text = msg;
+
+        yield return new WaitForSeconds(duration);
+
+        if (activeUnit != null && !battleEnded)
+            turnText.text = $"{activeUnit.name} TURN (SPD {activeUnit.speed})";
+        else
+            turnText.text = prev;
+
+        apInsufficientTextCo = null;
+    }
+
+    void ShakeButton(Button button)
+    {
+        if (button == null) return;
+
+        if (buttonShakeCos.TryGetValue(button, out var oldCo) && oldCo != null)
+            StopCoroutine(oldCo);
+
+        var co = StartCoroutine(CoShakeButton(button));
+        buttonShakeCos[button] = co;
+    }
+
+    IEnumerator CoShakeButton(Button button)
+    {
+        if (button == null) yield break;
+
+        RectTransform rt = button.transform as RectTransform;
+        if (rt == null) yield break;
+
+        Vector2 basePos = rt.anchoredPosition;
+        float t = 0f;
+
+        while (t < apButtonShakeDuration)
+        {
+            t += Time.deltaTime;
+            float damper = 1f - Mathf.Clamp01(t / apButtonShakeDuration);
+
+            float x = Random.Range(-1f, 1f) * apButtonShakeMagnitude * damper;
+            float y = Random.Range(-1f, 1f) * (apButtonShakeMagnitude * 0.35f) * damper;
+
+            rt.anchoredPosition = basePos + new Vector2(x, y);
+            yield return null;
+        }
+
+        rt.anchoredPosition = basePos;
+        buttonShakeCos[button] = null;
     }
 }   

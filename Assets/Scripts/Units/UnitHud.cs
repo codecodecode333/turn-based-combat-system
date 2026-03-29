@@ -1,4 +1,4 @@
-using System.Text;
+using System.Collections;
 using TMPro;
 using UnityEngine;
 
@@ -7,39 +7,56 @@ public class UnitHud : MonoBehaviour
     [Header("Refs")]
     public Unit unit;                 // 자동 연결 가능
     public TMP_Text hpText;
-    public TMP_Text turnText;
-    public TMP_Text statusText;       // 추가: 상태 표시용
+    public TMP_Text apText;
 
     [Header("Follow")]
-    public Vector3 offset = new Vector3(0f, 0.6f, 0f);
+    public Vector3 offset = new Vector3(0f, 1.35f, 0f);
     public bool faceCamera = true;
 
-    Camera cam;
-
     [Header("Target UX")]
-    public GameObject targetIndicator; // 아이콘(예: !, 검표시 등) 오브젝트
+    public GameObject targetIndicator; // 아이콘(예: !, 검표시 등)
+
+    [Header("AP Feedback")]
+    public Color normalApColor = Color.white;
+    public Color lowApColor = new Color(1f, 0.4f, 0.4f, 1f);
+    public float apFlashDuration = 0.18f;
+    public float apPunchScale = 1.15f;
+
+    Coroutine apFlashCo;
+    Vector3 apTextBaseScale = Vector3.one;
+
+    Camera cam;
 
     void Awake()
     {
         if (!unit) unit = GetComponentInParent<Unit>();
         cam = Camera.main;
 
+        if (!hpText)
+        {
+            var t = transform.Find("Canvas/HPText");
+            if (t) hpText = t.GetComponent<TMP_Text>();
+        }
+
+        if (!apText)
+        {
+            var t = transform.Find("Canvas/APText");
+            if (t) apText = t.GetComponent<TMP_Text>();
+        }
+
+        if (apText != null)
+            apTextBaseScale = apText.transform.localScale;
+
         if (!targetIndicator)
         {
-            // 네 구조: UnitHud/Canvas/Target_indicator
             var t = transform.Find("Canvas/Target_indicator");
             if (t) targetIndicator = t.gameObject;
         }
 
-        if (!statusText)
-        {
-            // 네 구조에서 statusText 자동 탐색
-            var t = transform.Find("Canvas/StatusText");
-            if (t) statusText = t.GetComponent<TMP_Text>();
-        }
+        if (targetIndicator)
+            targetIndicator.SetActive(false);
 
-        // 기본은 무조건 OFF
-        if (targetIndicator) targetIndicator.SetActive(false);
+        Refresh();
     }
 
     void LateUpdate()
@@ -57,83 +74,58 @@ public class UnitHud : MonoBehaviour
     {
         if (!unit) return;
 
-        if (hpText)
-            hpText.text = $"HP {unit.currentHP}/{unit.maxHP}";
-
-        if (turnText && string.IsNullOrEmpty(turnText.text))
-            turnText.text = $"SPD {unit.speed}";
-
-        RefreshStatus();
+        RefreshHp();
+        RefreshAp();
     }
 
-    void RefreshStatus()
+    void RefreshHp()
     {
-        if (!statusText)
-            return;
+        if (!hpText) return;
 
-        if (unit == null || unit.StatusEffects == null || unit.StatusEffects.Count == 0)
-        {
-            statusText.text = "";
-            return;
-        }
-
-        var sb = new StringBuilder(64);
-
-        for (int i = 0; i < unit.StatusEffects.Count; i++)
-        {
-            var s = unit.StatusEffects[i];
-            if (s == null || s.IsExpired) continue;
-
-            if (sb.Length > 0)
-                sb.Append('\n');
-
-            sb.Append(GetStatusLabel(s));
-
-            if (s.remainingTurns > 0)
-                sb.Append(" (").Append(s.remainingTurns).Append(')');
-        }
-
-        statusText.text = sb.ToString();
+        hpText.text = $"HP {unit.currentHP}/{unit.maxHP}";
     }
 
-    string GetStatusLabel(StatusEffect s)
+    void RefreshAp()
     {
-        switch (s.Id)
-        {
-            case StatusId.Burn:
-                return $"Burn {s.power}";
-            case StatusId.Poison:
-                return $"Poison {s.power}";
-            case StatusId.Stun:
-                return "Stun";
-            case StatusId.Freeze:
-                return "Freeze";
-            case StatusId.Slow:
-                return $"Slow {s.power}";
-            case StatusId.Counter:
-                return "Counter";
-            case StatusId.Invincible:
-                return "Invincible";
-            case StatusId.Shield:
-                return $"Shield {s.power}";
-            default:
-                return s.Id.ToString();
-        }
-    }
+        if (!apText) return;
 
-    public void SetTurnInfo(string info)
-    {
-        if (turnText) turnText.text = info;
-    }
+        apText.text = $"AP {unit.currentAP}/{unit.maxAP}";
 
-    public void ClearTurnInfo()
-    {
-        if (turnText) turnText.text = "";
+        if (unit.currentAP <= 0)
+            apText.color = new Color(1f, 0.4f, 0.4f);
+        else if (unit.currentAP < unit.maxAP)
+            apText.color = new Color(1f, 0.85f, 0.3f);
+        else
+            apText.color = Color.white;
     }
 
     public void SetTargeted(bool on)
     {
-        if (targetIndicator)
+        if (targetIndicator != null)
             targetIndicator.SetActive(on);
+    }
+
+    public void PulseAPInsufficient()
+    {
+        if (apText == null) return;
+
+        if (apFlashCo != null)
+            StopCoroutine(apFlashCo);
+
+        apFlashCo = StartCoroutine(CoPulseAPInsufficient());
+    }
+
+    IEnumerator CoPulseAPInsufficient()
+    {
+        if (apText == null) yield break;
+
+        apText.color = lowApColor;
+        apText.transform.localScale = apTextBaseScale * apPunchScale;
+
+        yield return new WaitForSeconds(apFlashDuration);
+
+        apText.color = normalApColor;
+        apText.transform.localScale = apTextBaseScale;
+        apFlashCo = null;
     }
 }
