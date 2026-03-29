@@ -114,16 +114,20 @@ public static class CombatTargetResolver
 
             return best;
         }
-
+                
         void AddUnitsInAOE(Vector2Int center)
         {
             int r = Mathf.Max(0, skill.aoeRadius);
+            bool allowFF = skill.allowFriendlyFire;
 
-            foreach (var u in AliveUnits(allies))
+            if (allowFF)
             {
-                Vector2Int pos = (u == caster) ? casterPos : u.GridPos;
-                if (Dist(center, pos) <= r)
-                    AddUnique(u);
+                foreach (var u in AliveUnits(allies))
+                {
+                    Vector2Int pos = (u == caster) ? casterPos : u.GridPos;
+                    if (Dist(center, pos) <= r)
+                        AddUnique(u);
+                }
             }
 
             foreach (var u in AliveUnits(enemies))
@@ -146,15 +150,35 @@ public static class CombatTargetResolver
 
             case SkillTargetMode.ClickSingle:
             {
-                if (clickedUnit != null && IsAlive(clickedUnit))
+                Unit target = null;
+
+                if (clickedTile.HasValue && grid != null)
+                    target = grid.GetUnitAt(clickedTile.Value);
+
+                if (target == null && clickedUnit != null && IsAlive(clickedUnit))
+                    target = clickedUnit;
+
+                if (target != null && IsAlive(target))
                 {
-                    bool canClickEnemy = enemies.Contains(clickedUnit);
-                    bool canClickAlly = allies.Contains(clickedUnit) && SkillMetaUtility.IsMostlyHelpfulSkill(skill);
+                    bool canClickEnemy = enemies.Contains(target);
+                    bool canClickAlly = allies.Contains(target) && SkillMetaUtility.IsMostlyHelpfulSkill(skill);
+
+                    Vector2Int targetTile;
+
+                    // 핵심:
+                    // self-target은 clickedTile이 아니라 casterPos 기준으로 판정해야
+                    // 이동 후 previewPosition 기반과 실제 판정이 일치함
+                    if (target == caster)
+                        targetTile = casterPos;
+                    else if (clickedTile.HasValue)
+                        targetTile = clickedTile.Value;
+                    else
+                        targetTile = target.GridPos;
 
                     if ((canClickEnemy || canClickAlly) &&
-                        CanCastPoint(casterPos, clickedUnit.GridPos))
+                        CanCastPoint(casterPos, targetTile))
                     {
-                        AddUnique(clickedUnit);
+                        AddUnique(target);
                     }
                 }
                 break;

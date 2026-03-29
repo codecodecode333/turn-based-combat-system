@@ -49,6 +49,15 @@ public class BattleController : MonoBehaviour
     Coroutine apInsufficientTextCo;
     readonly Dictionary<Button, Coroutine> buttonShakeCos = new Dictionary<Button, Coroutine>();
 
+    [Header("Fail Feedback Text")]
+    public string msgNotEnoughAP = "AP 부족";
+    public string msgOutOfRange = "사거리 밖";
+    public string msgBlockedByLOS = "LOS 차단";
+    public string msgNoValidTarget = "유효한 대상 없음";
+    public string msgHeightRestricted = "높이 차로 이동 불가";
+    public string msgInvalidMove = "이동 불가";
+    public string msgCannotAct = "행동 불가";
+
     [Header("Preview Actor")]
     public bool usePreviewActorGhost = true;
     [Range(0f, 1f)] public float sourceActorPreviewAlpha = 0.4f;
@@ -206,6 +215,18 @@ public class BattleController : MonoBehaviour
         Move,
         SkillPreview
     }
+
+    public enum ActionFailReason
+    {
+        None,
+        NotEnoughAP,
+        OutOfRange,
+        BlockedByLOS,
+        NoValidTarget,
+        HeightRestricted,
+        InvalidMove,
+        CannotAct
+    }
     private PlayerInputMode inputMode = PlayerInputMode.Move;
 
     private bool hasMovedThisTurn = false;
@@ -218,9 +239,6 @@ public class BattleController : MonoBehaviour
     // - ClickTileAOE에서는 중심 타일 hover
     // - ClickSingle / All* / AutoNearestSingle에서도 "현재 커서 아래 타일" 공통 hover
     private Vector2Int? hoverTile = null;
-
-    // ClickSingle에서 유닛 hover 시 실제 preview 계산용
-    private Unit hoverSingleUnit = null;
 
     void Start()
     {
@@ -936,66 +954,17 @@ public class BattleController : MonoBehaviour
 
     public void OnHoverUnit(Unit hovered)
     {
-        if (battleEnded) return;
-        if (activeUnit == null || activeUnit.IsDead) return;
-        if (inputMode != PlayerInputMode.SkillPreview) return;
-        if (selectedSkill == null) return;
-        if (selectedSkill.targetMode != SkillTargetMode.ClickSingle) return;
-
-        if (hovered == null || hovered.IsDead)
-        {
-            if (hoverSingleUnit == null) return;
-            hoverSingleUnit = null;
-            RefreshPlanningVisuals();
-            return;
-        }
-
-        if (hoverSingleUnit == hovered) return;
-
-        hoverSingleUnit = hovered;
-        RefreshPlanningVisuals();
+        // ClickSingle을 tile 기반으로 바꿨으므로 사용 안 함.
     }
 
     public void ClearHoverSinglePreview()
     {
-        if (hoverSingleUnit == null)
-            return;
-
-        hoverSingleUnit = null;
-
-        if (busy || !waitingInput || battleEnded || activeUnit == null || activeUnit.IsDead)
-            return;
-
-        RefreshPlanningVisuals();
+        // ClickSingle hover도 hoverTile 하나로 처리하므로 별도 정리 불필요.
     }
 
     public void OnUnitClicked(Unit clicked)
     {
-        if (battleEnded) return;
-        if (!waitingInput || busy) return;
-        if (activeUnit == null || activeUnit.IsDead) return;
-        if (!IsAlly(activeUnit)) return;
-
-        if (inputMode != PlayerInputMode.SkillPreview) return;
-        if (PlannedSkill == null) return;
-        if (clicked == null || clicked.IsDead) return;
-        if (PlannedSkill.targetMode != SkillTargetMode.ClickSingle) return;
-
-        var resolved = CombatTargetResolver.ResolveTargetsFromPosition(
-            PlannedSkill,
-            activeUnit,
-            PreviewPosition,
-            GetCasterAllies(activeUnit),
-            GetCasterEnemies(activeUnit),
-            grid,
-            null,
-            clicked
-        );
-
-        if (resolved.Count == 0) return;
-
-        SetPlannedSkillTarget(null, clicked);
-        RefreshPlanningVisuals();
+        // ClickSingle을 tile 기반으로 바꿨으므로 사용 안 함.
     }
 
     public void OnTileClicked(Vector2Int gridPos)
@@ -1005,19 +974,52 @@ public class BattleController : MonoBehaviour
         if (activeUnit == null || activeUnit.IsDead) return;
         if (!IsAlly(activeUnit)) return;
 
+        // ClickSingle 타일 클릭
+        if (inputMode == PlayerInputMode.SkillPreview &&
+            selectedSkill != null &&
+            selectedSkill.targetMode == SkillTargetMode.ClickSingle)
+        {
+            Unit clickedTarget = GetUnitFromClickedTile(gridPos);
+
+            // self-target preview tile special case
+            if (clickedTarget == null &&
+                activeUnit != null &&
+                !activeUnit.IsDead &&
+                gridPos == PreviewPosition)
+            {
+                clickedTarget = activeUnit;
+            }
+
+            var fail = EvaluateTileTargetFailure(PlannedSkill, gridPos, PreviewPosition);
+            if (fail != ActionFailReason.None)
+            {
+                TriggerActionFailFeedback(fail, PlannedSkillIndex, pulseHudAP: false);
+                return;
+            }
+
+            if (clickedTarget == null || clickedTarget.IsDead)
+            {
+                TriggerActionFailFeedback(ActionFailReason.NoValidTarget, PlannedSkillIndex, false);
+                return;
+            }
+
+            hoverTile = null;
+            SetPlannedSkillTarget(gridPos, clickedTarget);
+            RefreshPlanningVisuals();
+            return;
+        }
+
         // AOE 타일 클릭
         if (inputMode == PlayerInputMode.SkillPreview &&
             selectedSkill != null &&
             selectedSkill.targetMode == SkillTargetMode.ClickTileAOE)
         {
-            bool castable = CombatTargetResolver.IsPointCastable(
-                PlannedSkill,
-                PreviewPosition,
-                gridPos,
-                grid
-            );
-
-            if (!castable) return;
+            var fail = EvaluateTileTargetFailure(PlannedSkill, gridPos, PreviewPosition);
+            if (fail != ActionFailReason.None)
+            {
+                TriggerActionFailFeedback(fail, PlannedSkillIndex, pulseHudAP: false);
+                return;
+            }
 
             hoverTile = null;
             SetPlannedSkillTarget(gridPos, null);
@@ -1038,8 +1040,6 @@ public class BattleController : MonoBehaviour
             reachableMoveCache = data.cost;
             reachableMoveCameFromCache = data.cameFrom;
         }
-
-        if (!reachableMoveCache.ContainsKey(gridPos)) return;
 
         if (gridPos == activeUnit.GridPos)
         {
@@ -1212,10 +1212,12 @@ public class BattleController : MonoBehaviour
                 case SkillTargetMode.ClickSingle:
                 {
                     // locked target preview
-                    if (PlannedClickedUnit != null && !PlannedClickedUnit.IsDead)
+                    if (PlannedClickedTile.HasValue)
                     {
-                        Vector2Int lockedPos = (PlannedClickedUnit == activeUnit) ? PreviewPosition : PlannedClickedUnit.GridPos;
-                        tileHighlighter.ShowSelectedTile(lockedPos);
+                        Vector2Int targetTile = PlannedClickedTile.Value;
+                        tileHighlighter.ShowSelectedTile(targetTile);
+
+                        Unit clickedTarget = GetUnitFromClickedTile(targetTile);
 
                         var resolved = CombatTargetResolver.ResolveTargetsFromPosition(
                             PlannedSkill,
@@ -1224,39 +1226,54 @@ public class BattleController : MonoBehaviour
                             GetCasterAllies(activeUnit),
                             GetCasterEnemies(activeUnit),
                             grid,
-                            null,
-                            PlannedClickedUnit
+                            targetTile,
+                            clickedTarget
                         );
 
                         ShowResolvedSkillPreview(
                             resolved,
                             activeUnit,
                             PreviewPosition,
-                            showPreviewArea: true,
+                            showPreviewArea: true,   // ← 복구 포인트
                             showActionable: true
                         );
                     }
-                    // hover target preview
-                    else if (hoverSingleUnit != null && !hoverSingleUnit.IsDead)
+                    // hover preview
+                    else if (hoverTile.HasValue)
                     {
-                        var resolved = CombatTargetResolver.ResolveTargetsFromPosition(
+                        Vector2Int targetTile = hoverTile.Value;
+                        tileHighlighter.ShowSelectedTile(targetTile);
+
+                        bool castable = CombatTargetResolver.IsPointCastable(
                             PlannedSkill,
-                            activeUnit,
                             PreviewPosition,
-                            GetCasterAllies(activeUnit),
-                            GetCasterEnemies(activeUnit),
-                            grid,
-                            null,
-                            hoverSingleUnit
+                            targetTile,
+                            grid
                         );
 
-                        ShowResolvedSkillPreview(
-                            resolved,
-                            activeUnit,
-                            PreviewPosition,
-                            showPreviewArea: true,
-                            showActionable: true
-                        );
+                        if (castable)
+                        {
+                            Unit hoveredTarget = GetUnitFromClickedTile(targetTile);
+
+                            var resolved = CombatTargetResolver.ResolveTargetsFromPosition(
+                                PlannedSkill,
+                                activeUnit,
+                                PreviewPosition,
+                                GetCasterAllies(activeUnit),
+                                GetCasterEnemies(activeUnit),
+                                grid,
+                                targetTile,
+                                hoveredTarget
+                            );
+
+                            ShowResolvedSkillPreview(
+                                resolved,
+                                activeUnit,
+                                PreviewPosition,
+                                showPreviewArea: true,   // ← 복구 포인트
+                                showActionable: true
+                            );
+                        }
                     }
 
                     break;
@@ -1527,6 +1544,8 @@ public class BattleController : MonoBehaviour
 
                 if (RequiresExplicitTarget(action.skill) && !HasExplicitTarget(action))
                 {
+                    TriggerActionFailFeedback(ActionFailReason.NoValidTarget, action.skillIndex, false);
+
                     busy = false;
                     waitingInput = true;
                     SetSkillButtonsInteractable(true);
@@ -1536,6 +1555,8 @@ public class BattleController : MonoBehaviour
 
                 if (!activeUnit.CanPayAP(action.skill.costAP))
                 {
+                    TriggerActionFailFeedback(ActionFailReason.NotEnoughAP, action.skillIndex, true);
+
                     busy = false;
                     waitingInput = true;
                     SetSkillButtonsInteractable(true);
@@ -1575,6 +1596,16 @@ public class BattleController : MonoBehaviour
 
                     executedAnyAction = true;
                     executedSkill = true;
+                }
+                else
+                {
+                    TriggerActionFailFeedback(ActionFailReason.NoValidTarget, action.skillIndex, false);
+
+                    busy = false;
+                    waitingInput = true;
+                    SetSkillButtonsInteractable(true);
+                    RefreshPlanningVisuals();
+                    yield break;
                 }
             }
         }
@@ -1678,7 +1709,18 @@ public class BattleController : MonoBehaviour
         EnsureReachableMoveCacheCurrent();
 
         if (reachableMoveCache == null || !reachableMoveCache.ContainsKey(gridPos))
+        {
+            bool inBounds = grid != null && grid.InBounds(gridPos);
+            bool climbBlocked = false;
+
+            if (grid != null && activeUnit != null && inBounds)
+                climbBlocked = !grid.CanClimb(activeUnit, activeUnit.GridPos, gridPos);
+
+            TriggerActionFailFeedback(
+                climbBlocked ? ActionFailReason.HeightRestricted : ActionFailReason.InvalidMove
+            );
             return;
+        }
 
         if (gridPos == activeUnit.GridPos)
         {
@@ -1754,7 +1796,6 @@ public class BattleController : MonoBehaviour
             skillAction.clickedUnit = null;
         }
 
-        hoverSingleUnit = null;
         ClearPreviewTargetIndicators();
         ClearHoverAOEPreview();
     }
@@ -1791,7 +1832,6 @@ public class BattleController : MonoBehaviour
         selectedSkillIndex = -1;
         hoverMoveTile = null;
         hoverTile = null;
-        hoverSingleUnit = null;
 
         if (tileHighlighter) tileHighlighter.ClearGhostTile();
 
@@ -1834,7 +1874,20 @@ public class BattleController : MonoBehaviour
         switch (action.skill.targetMode)
         {
             case SkillTargetMode.ClickSingle:
-                return action.clickedUnit != null;
+            {
+                if (action.clickedUnit != null)
+                    return true;
+
+                if (action.clickedTile.HasValue &&
+                    activeUnit != null &&
+                    !activeUnit.IsDead &&
+                    action.clickedTile.Value == PreviewPosition)
+                {
+                    return true;
+                }
+
+                return false;
+            }
 
             case SkillTargetMode.ClickTileAOE:
                 return action.clickedTile.HasValue;
@@ -2018,13 +2071,16 @@ public class BattleController : MonoBehaviour
             var u = resolvedTargets[i];
             if (u == null || u.IsDead) continue;
 
-            Vector2Int pos = (u == caster) ? casterPreviewPos : u.GridPos;
             bool sameSide = IsAlly(u) == casterIsAlly;
+            var occupied = GetUnitOccupiedTiles(u, casterPreviewPos);
 
-            if (sameSide)
-                previewFriendlyFireTiles.Add(pos);
-            else
-                previewEnemyTiles.Add(pos);
+            for (int j = 0; j < occupied.Count; j++)
+            {
+                if (sameSide)
+                    previewFriendlyFireTiles.Add(occupied[j]);
+                else
+                    previewEnemyTiles.Add(occupied[j]);
+            }
         }
     }
 
@@ -2054,8 +2110,9 @@ public class BattleController : MonoBehaviour
             var u = resolvedTargets[i];
             if (u == null || u.IsDead) continue;
 
-            Vector2Int pos = (u == caster) ? casterPreviewPos : u.GridPos;
-            set.Add(pos);
+            var occupied = GetUnitOccupiedTiles(u, casterPreviewPos);
+            for (int j = 0; j < occupied.Count; j++)
+                set.Add(occupied[j]);
         }
 
         return set;
@@ -2409,17 +2466,43 @@ public class BattleController : MonoBehaviour
 
     void TriggerAPInsufficientFeedback(int skillIndex)
     {
-        ShowTemporaryTurnText(apInsufficientMessage);
+        TriggerActionFailFeedback(
+            ActionFailReason.NotEnoughAP,
+            skillIndex,
+            pulseHudAP: true
+        );
+    }
 
-        if (skillButtons != null &&
-            skillIndex >= 0 &&
+    string GetFailMessage(ActionFailReason reason)
+    {
+        switch (reason)
+        {
+            case ActionFailReason.NotEnoughAP:   return msgNotEnoughAP;
+            case ActionFailReason.OutOfRange:    return msgOutOfRange;
+            case ActionFailReason.BlockedByLOS:  return msgBlockedByLOS;
+            case ActionFailReason.NoValidTarget: return msgNoValidTarget;
+            case ActionFailReason.HeightRestricted: return msgHeightRestricted;
+            case ActionFailReason.InvalidMove:   return msgInvalidMove;
+            case ActionFailReason.CannotAct:     return msgCannotAct;
+            default:                             return "";
+        }
+    }
+
+    void TriggerActionFailFeedback(ActionFailReason reason, int skillIndex = -1, bool pulseHudAP = false)
+    {
+        string msg = GetFailMessage(reason);
+        if (!string.IsNullOrEmpty(msg))
+            ShowTemporaryTurnText(msg);
+
+        if (skillIndex >= 0 &&
+            skillButtons != null &&
             skillIndex < skillButtons.Length &&
             skillButtons[skillIndex] != null)
         {
             ShakeButton(skillButtons[skillIndex]);
         }
 
-        if (activeUnit != null)
+        if (pulseHudAP && activeUnit != null)
         {
             var hud = activeUnit.GetComponentInChildren<UnitHud>(true);
             if (hud != null)
@@ -2489,5 +2572,156 @@ public class BattleController : MonoBehaviour
 
         rt.anchoredPosition = basePos;
         buttonShakeCos[button] = null;
+    }
+
+    bool IsInSkillRangeFromPreview(SkillData skill, Vector2Int from, Vector2Int to)
+    {
+        if (skill == null) return false;
+
+        int d = Mathf.Abs(from.x - to.x) + Mathf.Abs(from.y - to.y);
+        return d >= skill.minRange && d <= skill.maxRange;
+    }
+
+    ActionFailReason EvaluateCastPointFailure(SkillData skill, Vector2Int from, Vector2Int to)
+    {
+        if (skill == null) return ActionFailReason.NoValidTarget;
+
+        if (!IsInSkillRangeFromPreview(skill, from, to))
+            return ActionFailReason.OutOfRange;
+
+        if (skill.requiresLineOfSight && (grid == null || !grid.HasLineOfSight(from, to)))
+            return ActionFailReason.BlockedByLOS;
+
+        return ActionFailReason.None;
+    }
+
+    ActionFailReason EvaluateUnitTargetFailure(SkillData skill, Unit target, Vector2Int from)
+    {
+        if (skill == null || target == null || target.IsDead)
+            return ActionFailReason.NoValidTarget;
+
+        var pointFail = EvaluateCastPointFailure(skill, from, target.GridPos);
+        if (pointFail != ActionFailReason.None)
+            return pointFail;
+
+        var resolved = CombatTargetResolver.ResolveTargetsFromPosition(
+            skill,
+            activeUnit,
+            from,
+            GetCasterAllies(activeUnit),
+            GetCasterEnemies(activeUnit),
+            grid,
+            null,
+            target
+        );
+
+        return (resolved != null && resolved.Count > 0)
+            ? ActionFailReason.None
+            : ActionFailReason.NoValidTarget;
+    }
+
+    ActionFailReason EvaluateTileTargetFailure(SkillData skill, Vector2Int tile, Vector2Int from)
+    {
+        if (skill == null)
+            return ActionFailReason.NoValidTarget;
+
+        var pointFail = EvaluateCastPointFailure(skill, from, tile);
+        if (pointFail != ActionFailReason.None)
+            return pointFail;
+
+        if (skill.targetMode == SkillTargetMode.ClickSingle)
+        {
+            Unit target = GetUnitFromClickedTile(tile);
+
+            if (target == null &&
+                activeUnit != null &&
+                !activeUnit.IsDead &&
+                tile == from)
+            {
+                target = activeUnit;
+            }
+
+            if (target == null || target.IsDead)
+                return ActionFailReason.NoValidTarget;
+
+            if (!CanSkillAffectUnit(skill, target))
+                return ActionFailReason.NoValidTarget;
+
+            var resolved = CombatTargetResolver.ResolveTargetsFromPosition(
+                skill,
+                activeUnit,
+                from,
+                GetCasterAllies(activeUnit),
+                GetCasterEnemies(activeUnit),
+                grid,
+                tile,
+                target
+            );
+
+            return (resolved != null && resolved.Count > 0)
+                ? ActionFailReason.None
+                : ActionFailReason.NoValidTarget;
+        }
+
+        if (skill.targetMode == SkillTargetMode.ClickTileAOE)
+        {
+            var resolved = CombatTargetResolver.ResolveTargetsFromPosition(
+                skill,
+                activeUnit,
+                from,
+                GetCasterAllies(activeUnit),
+                GetCasterEnemies(activeUnit),
+                grid,
+                tile,
+                null
+            );
+
+            bool allowEmptyAOE = true;
+            if (resolved != null && resolved.Count > 0)
+                return ActionFailReason.None;
+
+            return allowEmptyAOE ? ActionFailReason.None : ActionFailReason.NoValidTarget;
+        }
+
+        return ActionFailReason.NoValidTarget;
+    }
+
+    Unit GetUnitFromClickedTile(Vector2Int tile)
+    {
+        if (activeUnit != null &&
+            !activeUnit.IsDead &&
+            tile == PreviewPosition)
+        {
+            return activeUnit;
+        }
+
+        if (grid == null) return null;
+        return grid.GetUnitAt(tile);
+    }
+
+    // 지금은 1x1 기준.
+    // 나중에 2x2 유닛 넣을 때 이 함수만 확장하면 됨.
+    List<Vector2Int> GetUnitOccupiedTiles(Unit unit, Vector2Int casterPreviewPos)
+    {
+        var result = new List<Vector2Int>();
+        if (unit == null || unit.IsDead) return result;
+
+        if (unit == activeUnit)
+            result.Add(casterPreviewPos);
+        else
+            result.Add(unit.GridPos);
+
+        return result;
+    }
+
+    bool CanSkillAffectUnit(SkillData skill, Unit target)
+    {
+        if (skill == null || target == null || target.IsDead || activeUnit == null)
+            return false;
+
+        bool canClickEnemy = GetCasterEnemies(activeUnit).Contains(target);
+        bool canClickAlly = GetCasterAllies(activeUnit).Contains(target) && SkillMetaUtility.IsMostlyHelpfulSkill(skill);
+
+        return canClickEnemy || canClickAlly;
     }
 }   

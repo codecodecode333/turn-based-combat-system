@@ -489,7 +489,14 @@ public class GridManager : MonoBehaviour
     public bool CanClimb(Unit mover, Vector2Int from, Vector2Int to)
     {
         if (mover == null) return false;
-        int dh = Mathf.Abs(GetHeightDelta(from, to));
+
+        var fromTile = GetTileView(from);
+        var toTile = GetTileView(to);
+
+        int fromH = fromTile != null ? fromTile.HeightLevel : 0;
+        int toH = toTile != null ? toTile.HeightLevel : 0;
+
+        int dh = Mathf.Abs(toH - fromH);
         return dh <= mover.maxClimbDelta;
     }
 

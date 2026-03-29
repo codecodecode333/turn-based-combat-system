@@ -378,7 +378,7 @@ public static class AIPlanner
                         moveTile = fromTile,
                         skill = skill,
                         clickedUnit = bestT,
-                        clickedTile = null,
+                        clickedTile = bestT != null ? (Vector2Int?)bestT.GridPos : null,
                         targetCount = bestCount,
                         score = bestScore
                     });

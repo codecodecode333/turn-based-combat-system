@@ -17,9 +17,9 @@ public class TileHighlighter : MonoBehaviour
         None = 0,
         Selected = 1 << 0,
         Actionable = 1 << 1,
-        TargetHit = 1 << 1,
-        FriendlyFire = 1 << 2,
-        Hazard = 1 << 3
+        TargetHit = 1 << 2,
+        FriendlyFire = 1 << 3,
+        Hazard = 1 << 4
     }
 
     [System.Serializable]

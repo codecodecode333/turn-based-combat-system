@@ -34,6 +34,9 @@ public class SkillData : ScriptableObject
     [Header("Target (NEW)")]
     public SkillTargetMode targetMode = SkillTargetMode.ClickSingle;
 
+    [Header("AOE Options")]
+    public bool allowFriendlyFire = true;
+
     [Tooltip("ClickTileAOE에서 사용. 중심 타일로부터 Manhattan 반경")]
     public int aoeRadius = 0;
 
