@@ -1,5 +1,69 @@
 %YAML 1.1
 %TAG !u! tag:unity3d.com,2011:
+--- !u!1 &709734712777144347
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 5298289657311364239}
+  m_Layer: 0
+  m_Name: FX_BodySocket
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &5298289657311364239
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 709734712777144347}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0.3, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 4191086047316079904}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1696351878782002114
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 4191086047316079904}
+  m_Layer: 0
+  m_Name: FXRoot
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &4191086047316079904
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1696351878782002114}
+  serializedVersion: 2
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children:
+  - {fileID: 5298289657311364239}
+  - {fileID: 2363731035066425264}
+  m_Father: {fileID: 1496583877744611995}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &3484904138076404565
 GameObject:
   m_ObjectHideFlags: 0
@@ -11,6 +75,7 @@ GameObject:
   - component: {fileID: 1496583877744611995}
   - component: {fileID: 6912995081859625821}
   - component: {fileID: 361334210989889349}
+  - component: {fileID: 1529454544252327920}
   m_Layer: 0
   m_Name: Player_Lavien
   m_TagString: Untagged
@@ -33,6 +98,7 @@ Transform:
   m_Children:
   - {fileID: 4354101382296774120}
   - {fileID: 2902499620742248747}
+  - {fileID: 4191086047316079904}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!114 &6912995081859625821
@@ -117,6 +183,28 @@ BoxCollider2D:
   m_AutoTiling: 0
   m_Size: {x: 1, y: 1}
   m_EdgeRadius: 0
+--- !u!114 &1529454544252327920
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3484904138076404565}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 27896841df2f4c048af9a66fd11f9223, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::UnitFxPlayer
+  fxBodySocket: {fileID: 5298289657311364239}
+  fxHeadSocket: {fileID: 2363731035066425264}
+  burnBodyPrefab: {fileID: 4574571030800446541, guid: f58cf54e3370d4e41a468444c6892452, type: 3}
+  burnHeadPrefab: {fileID: 1219026901989134974, guid: bbc006b0301686441886f132d8cbcfe9, type: 3}
+  burnTickBodyPrefab: {fileID: 0}
+  hitPrefab: {fileID: 2181703329087895170, guid: 15a1142229e95e844afb593822c29c5e, type: 3}
+  stunLoopPrefab: {fileID: 2437645426143670504, guid: f870f3ccf2cc90d4699c39a15e637260, type: 3}
+  useHeadFx: 1
+  damageTextPrefab: {fileID: 4104464436756278640, guid: 0117df43d481c124cb53a22c17b1fe2e, type: 3}
+  damageTextSocket: {fileID: 2363731035066425264}
 --- !u!1 &5714073939035093761
 GameObject:
   m_ObjectHideFlags: 0
@@ -244,6 +332,37 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: bd75098e98b5e0e418e9c829e9dc55f7, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::AnimationEventRelay
+--- !u!1 &8065757871713546570
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 2363731035066425264}
+  m_Layer: 0
+  m_Name: FX_HeadSocket
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &2363731035066425264
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8065757871713546570}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0.3, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 4191086047316079904}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1001 &2855174756320680691
 PrefabInstance:
   m_ObjectHideFlags: 0

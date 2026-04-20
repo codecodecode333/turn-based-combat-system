@@ -1,0 +1,366 @@
+# TILE_SYSTEM_DESIGN v2
+
+## 목적
+
+본 문서는 타일 시스템의 실제 규칙을 정의한다.
+타일은 전투에서 다음 요소를 결정한다.
+
+* 이동 가능 여부
+* 점유 / 통과 규칙
+* LOS 차단
+* Height(고저) 이동 제약
+* 강제이동 가능 여부
+* Hazard 효과
+* AI의 위험/선호 판단
+
+현재 타일 데이터 구조는 `tileType`, `passable`, `blocksLOS`, `heightLevel`, `hazardType`, `hazardTrigger` 등을 포함한다.
+`TileView`는 이를 전투 런타임에서 노출한다.
+
+---
+
+# 1. 타일의 역할
+
+타일은 전투에서 다음을 결정한다.
+
+* `passable`: 이동 가능 여부
+* `blocksLOS`: 시야 차단 여부
+* `heightLevel`: 고저
+* `hazardType`: 위험 지형 종류
+* `hazardTrigger`: 위험 지형 발동 시점
+* `occupied`: 현재 유닛 점유 여부
+
+현재 GridManager는 이동 가능 판정, 점유, 경로, LOS를 담당한다.
+
+---
+
+# 2. 타일 구조
+
+## 2.1 Base Terrain
+
+기본 지형은 다음과 같이 분리한다.
+
+```plaintext id="3264gh"
+Normal
+Wall
+Obstacle
+Forest
+Water
+```
+
+## 2.2 Hazard Overlay
+
+Hazard는 기본적으로 **Base Terrain 위에 얹는 별도 속성**으로 본다.
+
+주요 Hazard:
+
+* Burn
+* Poison
+* Explosion
+
+권장 구조:
+
+```plaintext id="y6dbtr"
+Base Tile
++ Hazard Overlay
+```
+
+다만 구현 편의상 일부는 타일 타입과 결합된 형태를 허용할 수 있다.
+
+---
+
+# 3. Height 규칙
+
+## 3.1 Height 적용 범위
+
+Height는 v2에서 다음에 적용한다.
+
+```plaintext id="3cwzbe"
+이동
+강제이동
+```
+
+전투 보너스(고지대 명중/피해 보정)는 이번 버전의 핵심 규칙에 포함하지 않는다.
+전투 수치 보정은 추후 별도 밸런싱 단계에서 검토한다.
+
+## 3.2 Height 이동 제한
+
+각 유닛은 `maxClimbDelta`를 가진다.
+
+이웃 타일로 이동할 때:
+
+```plaintext id="ulrp5i"
+abs(target.height - current.height) <= maxClimbDelta
+```
+
+를 만족해야 이동 가능하다.
+
+현재 타일 설계 문서와 GridManager/Unit 구조도 이 방향과 맞닿아 있다.
+
+## 3.3 Height 이동 비용
+
+Move는 AP를 소모하지 않으므로, Height 비용은 AP가 아니라 **이동 칸 수(moveRange) 소모 증가**로 해석한다.
+
+예시:
+
+```plaintext id="bdbk2m"
+moveRange = 3
+높이차 0 이동 = 1칸 소모
+높이차 1 이동 = 2칸 소모
+높이차 2 이동 = 3칸 소모
+```
+
+권장 규칙:
+
+```plaintext id="j99mle"
+MoveCost = 1 + abs(dh)
+```
+
+즉, 높이차가 클수록 실질 이동 가능 거리가 줄어든다.
+
+---
+
+# 4. 점유 / 통과 규칙
+
+## 4.1 기본 규칙
+
+이동 가능 조건:
+
+* `passable == true`
+* 목적지 타일이 점유되지 않음
+* Height 이동 제한 만족
+* 맵 범위 내
+
+## 4.2 아군 통과 규칙
+
+권장 확장 규칙:
+
+```plaintext id="qoz39m"
+아군 통과 가능
+적 통과 불가
+도착 칸 점유 불가
+```
+
+이 규칙은 전투 흐름을 부드럽게 만들고 아군 길막 스트레스를 줄인다.
+다만 최종 도착 칸 점유 금지는 유지해야 포지셔닝 의미가 살아난다.
+
+현재 구현은 점유 칸 통과/도착 모두 제한에 가깝고,
+아군 통과 허용은 추후 확장 규칙으로 본다.
+
+## 4.3 자기 시작 위치 예외
+
+탐색(BFS/경로 계산)에서는 자기 시작 위치를 예외적으로 허용한다.
+
+---
+
+# 5. Wall / Obstacle / Terrain 차이
+
+## 5.1 Wall
+
+Wall은 완전 차단 지형이다.
+
+* passable = false
+* blocksLOS = true
+
+## 5.2 Obstacle
+
+Obstacle은 변형 가능한 차단 지형이다.
+
+기본 권장:
+
+* passable = false
+* blocksLOS = 상황별
+
+즉, 일부 Obstacle은 LOS를 막고, 일부는 막지 않을 수 있다.
+이는 오브젝트 성격에 따라 조정 가능하다.
+
+## 5.3 Forest / Water
+
+이번 v2에서는 세부 전투 효과를 정의하지 않는다.
+
+* Forest: TODO
+* Water: TODO
+
+향후 확장 예시:
+
+* Forest: 시야 / 회피 / 이동 보정
+* Water: 이동 불리 / 상태이상 상호작용
+
+---
+
+# 6. LOS 규칙
+
+## 6.1 현재 규칙
+
+현재 LOS는 Height와 무관하게 `blocksLOS`로 판정한다.
+GridManager의 LOS 처리도 중간 타일의 `blocksLOS`를 확인하는 방식이다.
+
+```plaintext id="mgbavw"
+현재 LOS = blocksLOS 기반
+현재 Height는 LOS에 영향 없음
+```
+
+## 6.2 향후 확장 여지
+
+다만 v2에서는 Height 기반 LOS 확장을 **보류가 아닌 확장 후보**로 명시한다.
+
+가능한 확장 예:
+
+* 고지대에서 LOS 유리
+* 낮은 지형 뒤 은폐
+* Height 차에 따른 사선 차단 보정
+
+즉, 문서상 원칙은 다음과 같다.
+
+```plaintext id="p6d7ci"
+현재 구현 = blocksLOS only
+추후 확장 = Height 반영 가능
+```
+
+이렇게 두면 현재 구현 안정성과 향후 전술 확장성을 동시에 유지할 수 있다.
+
+---
+
+# 7. Hazard 시스템
+
+## 7.1 정식 Hazard 종류
+
+v2 기준 정식 Hazard:
+
+* Burn
+* Poison
+* Explosion
+
+현재 코드상 HazardType으로도 정의되어 있다.
+
+## 7.2 발동 시점
+
+Hazard trigger는 다음을 유지한다.
+
+* `OnEnter`
+* `OnTurnStart`
+* `OnTurnEnd`
+
+이 구조는 TileData와 HazardSystem에 이미 반영되어 있다.
+
+## 7.3 효과 예시
+
+* Burn Hazard → Burn 상태 적용
+* Poison Hazard → Poison 상태 적용
+* Explosion Hazard → 즉시 피해
+
+현재 HazardSystem도 이 방향이다.
+
+## 7.4 이동 중 발동
+
+Hazard는 경로상의 각 step 진입 시 판정될 수 있다.
+즉, 도착 타일뿐 아니라 이동 과정 자체가 중요하다.
+
+---
+
+# 8. 강제이동 규칙
+
+강제이동(밀치기, 끌기 등)은 다음을 따른다.
+
+* 목적지 타일이 `passable` 이어야 함
+* 목적지 타일이 점유되지 않아야 함
+* 더 높은 타일로는 강제이동 불가
+* 같거나 더 낮은 타일만 가능
+
+즉:
+
+```plaintext id="m44tq8"
+dh > 0  => 불가
+dh <= 0 => 가능
+```
+
+이 규칙은 Height를 이동/강제이동에만 적용하는 현재 방향과 맞다.
+
+---
+
+# 9. AI와 타일 관계
+
+타일 문서에서는 AI 관련을 간단히만 정의한다.
+
+## 9.1 기본 원칙
+
+AI는 다음을 고려한다.
+
+* Hazard 회피
+* 이동 가능 타일 판단
+* Height로 인한 이동 가능성
+* LOS 차단 여부
+
+현재 AI는 Hazard penalty와 Height 이동 가능성을 함께 평가한다.
+
+## 9.2 선호
+
+* 위험 타일은 기본적으로 기피
+* 공격 기회가 더 크면 일부 감수 가능
+* Height 이동 불가 타일은 후보에서 제외
+
+---
+
+# 10. 타일 시각화 / 표현 원칙
+
+이번 v2에서는 아트 가이드까지는 가지 않고, 기본 원칙까지만 정의한다.
+
+## 10.1 Height 표현
+
+Height는 다음이 시각적으로 구분되어야 한다.
+
+* 상단 면
+* 측면 면
+* 높이 단계 차이
+
+## 10.2 차단 지형 표현
+
+* Wall은 명확한 차단 형태
+* Obstacle은 오브젝트형 차단물
+* Hazard는 기본 타일 위 추가 FX 또는 특수 스프라이트로 표현
+
+## 10.3 UX 목표
+
+플레이어가 다음을 한눈에 이해할 수 있어야 한다.
+
+* 어디로 이동 가능한지
+* 무엇이 LOS를 막는지
+* 어디가 위험한지
+* 어느 타일이 높은지
+
+---
+
+# 11. 현재 유지할 것 / 추후 검토할 것
+
+## 유지
+
+* Height는 이동/강제이동에 적용
+* Height 차는 실질 이동 거리 비용으로 반영 가능
+* Hazard trigger 3종 유지
+* Base Terrain + Hazard Overlay 구조
+* Wall / Obstacle 구분
+* 현재 LOS는 `blocksLOS` 기반
+
+## 추후 검토
+
+* Height 전투 보너스
+* Height 기반 LOS 확장
+* Forest 세부효과
+* Water 세부효과
+* AP 기반 이동 비용
+* 복잡한 지형 상호작용
+* 아군 통과 허용의 실제 코드 반영
+
+---
+
+# 12. 핵심 요약
+
+```plaintext id="4xwuq1"
+- Height는 이동과 강제이동에 적용
+- Height 차는 실질 이동 거리 비용으로 반영 가능
+- 현재 LOS는 blocksLOS만 사용하지만, 향후 Height 확장 여지를 남긴다
+- Hazard는 Base Tile 위 별도 속성으로 보는 것이 기본
+- Burn / Poison / Explosion이 정식 Hazard
+- 아군 통과 가능 / 종료 불가 규칙은 추후 확장 가치가 높다
+```
+
+END

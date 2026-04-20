@@ -1,0 +1,330 @@
+SKILL_SYSTEM_DESIGN.txt
+(아이소메트릭 그리드 턴제 전투 — Skill System Design)
+
+버전: Draft v0.2 (2026-03-05)
+작성 기준: 현재 프로젝트 구조 (SkillData / SkillEffect / StatusEffect / ResolveTargets / AnimationEventRelay / AIPlanner)
+핵심 변경: “AP(코스트) 기반 행동 경제 + AP 이월(저축)”
+
+============================================================
+0. 목적 / 범위
+============================================================
+이 문서는 스킬 시스템의 규칙(Design Contract)을 정의한다.
+- 플레이어 UX(프리뷰/클릭/확정)와 전투 로직(타겟 결정/효과 적용)이 동일 규칙을 공유해야 한다.
+- AIPlanner는 이 문서의 규칙대로 스킬을 평가/선택해야 한다.
+- 스킬은 ScriptableObject 기반 SkillData로 정의되고, 실제 결과는 SkillEffect 체인으로 구성된다.
+
+============================================================
+1. 행동 경제 (Action Economy) — AP(코스트) 시스템
+============================================================
+핵심 개념
+- 모든 유닛은 전투 중 AP(Action Point)를 가진다.
+- 스킬 사용 및 이동은 AP(cost)를 소비한다.
+- AP는 “최대치(MaxAP)”를 가지며, 턴마다 “회복(RegenAP)”된다.
+- 남은 AP는 다음 턴으로 이월될 수 있다(저축 가능).
+
+스탯(캐릭터/유닛 스탯)
+- MaxAP: AP 최대치 (예: 10)
+- RegenAP: 턴 시작 시 회복량 (예: 4)
+- CurrentAP: 현재 보유 AP (예: 4/10, 8/10 등)
+
+턴 시작 규칙 (TurnStart)
+- CurrentAP = min(MaxAP, CurrentAP + RegenAP)
+
+턴 종료 규칙 (TurnEnd)
+- 기본: CurrentAP 유지 (이월)
+- (선택 옵션, 밸런스 안전장치) AP 소멸/감쇠:
+  - CurrentAP = floor(CurrentAP * CarryOverRate)
+  - CarryOverRate 예: 0.8 (권장), 1.0(완전 이월), 0.5(강한 제약)
+  - 본 문서 v0.2 기본값: CarryOverRate = 1.0 (완전 이월)  [※ 필요 시 밸런스 단계에서 조정]
+
+스킬 사용 규칙
+- CurrentAP >= skillCost 일 때만 사용 가능
+- 사용 시: CurrentAP -= skillCost
+
+이동 규칙
+- Move 역시 AP를 소비할 수 있다(권장).
+- 기본 이동 cost 정책(권장안):
+  - MoveCost = 1 AP (이동 1회 단위, 또는 “이동 거리/타일당 cost”는 추후 확장)
+- Move와 Skill의 순서는 자유롭게 허용할 수 있다.
+  - 단, UX가 복잡해지면 “Move 후 Skill”을 기본 가이드로 둔다.
+
+턴 내 스킬 사용 횟수
+- AP 기반이므로 “이론상 여러 번” 사용 가능.
+- (선택 옵션, 턴 길이/UX 안전장치) MaxSkillCastsPerTurn:
+  - 0 또는 미설정: 제한 없음 (AP가 허용하는 만큼)
+  - 2: 턴당 최대 2회
+  - 1: 턴당 1회(기존 느낌 유지)
+  - 본 문서 v0.2 기본값: 제한 없음 (AP가 허용하는 만큼)
+
+============================================================
+2. 거리 / 사거리 규칙 (Range System)
+============================================================
+거리 계산
+- Manhattan Distance 사용
+  distance = |x1 - x2| + |y1 - y2|
+
+사거리 파라미터
+- minRange: 최소 사거리
+- maxRange: 최대 사거리
+
+규칙
+- distance < minRange  => 사용 불가
+- distance > maxRange  => 사용 불가
+- minRange <= distance <= maxRange => 사용 가능
+
+주의
+- 사거리 검증은 Preview/Confirm/AI 모두 동일한 함수로 처리해야 한다.
+
+============================================================
+3. Line of Sight (LOS) 규칙
+============================================================
+스킬은 LOS 정책을 가진다.
+- 벽 뒤 공격이 “가능한 스킬”과 “불가능한 스킬”이 공존한다.
+  예) 땅에서 올라오는 주문: LOS 불필요
+      활/투사체: LOS 필요
+
+권장 필드(설계)
+- requiresLineOfSight: bool
+- (선택) losType: enum { None, StraightLine, Bresenham, CustomBlockingRuleset }
+
+검증 위치
+- ResolveTargets()에서 최종 대상/중심 타일에 대해 LOS를 검증한다.
+
+============================================================
+4. 타겟팅 모드 (SkillTargetMode)
+============================================================
+SkillTargetMode는 스킬의 “대상 결정 방식”을 정의한다.
+지원(현재 프로젝트 기준)
+- AutoNearestSingle
+- ClickSingle
+- ClickTileAOE
+- AllEnemiesInRange
+- AllEnemiesAnywhere
+- AllAlliesInRange
+- AllAlliesAnywhere
+
+공통 원칙
+- ResolveTargets()는 Preview와 Confirm이 동일 규칙을 사용해야 한다.
+- 모드별 Preview 표시와 Confirm 실제 적용이 불일치하면 UX/AI가 붕괴한다.
+
+--------------------------------------------
+4.1 AutoNearestSingle
+--------------------------------------------
+정의
+- 자동으로 가장 가까운 유효 대상 1인을 선택.
+
+Preview
+- (선택) 가장 가까운 대상 1인을 하이라이트
+Confirm
+- 가장 가까운 대상 1인 적용
+
+--------------------------------------------
+4.2 ClickSingle
+--------------------------------------------
+정의
+- 플레이어가 유닛(단일 대상)을 클릭해 선택.
+
+Preview
+- 사거리(+LOS) 조건을 만족하는 선택 가능 유닛 표시
+Confirm
+- 클릭한 유닛 1인 적용
+- 조건 불만족 시 선택 불가/실패 처리
+
+--------------------------------------------
+4.3 ClickTileAOE
+--------------------------------------------
+정의
+- 플레이어가 “중심 타일”을 클릭해 범위 내 전체 타격.
+
+Preview
+- 중심으로 선택 가능한 타일(사거리(+LOS)) 표시
+- Hover 시 AOE 범위 실시간 표시
+
+Confirm
+- clickedTile(중심 타일)이 사거리/LOS 조건 만족해야 한다.
+- AOE 범위 내 “모든 유닛(아군/적군 포함)”이 타겟이다. (Friendly Fire ON)
+- 중심 타일도 범위에 포함되며, 중심 타일 위 유닛도 피해를 받는다.
+
+--------------------------------------------
+4.4 All* 계열
+--------------------------------------------
+정의
+- 범위/전장 전체 조건에 따라 적/아군 전체 대상.
+
+Preview
+- 조건 만족 전체 대상 표시
+Confirm
+- 조건 만족 전체 대상 적용
+
+============================================================
+5. AOE 규칙 (AOE System)
+============================================================
+AOE는 ClickTileAOE에서 사용한다.
+
+AOE 반경
+- aoeRadius (정수)
+
+범위 계산
+- Manhattan Disk 유지
+  dist(center, tile) <= aoeRadius 인 모든 타일 포함
+
+타겟 규칙
+- 범위 내 “모든 유닛” (적+아군) 대상
+- 중심 타일 포함
+
+============================================================
+6. SkillData 스펙 (권장 필드)
+============================================================
+필수
+- id / name / description
+- targetMode (SkillTargetMode)
+- minRange, maxRange
+- requiresLineOfSight (bool)
+- costAP (int)
+- effects[] (SkillEffect[])
+
+ClickTileAOE 전용
+- aoeRadius (int)
+
+(선택) 태그/분류 (AI/UX/밸런스 편의)
+- tags: [AOE, SingleTarget, FriendlyFire, RequiresLOS, IgnoresLOS, Direct, DOT, Control...]
+
+============================================================
+7. SkillEffect 시스템 (Effects)
+============================================================
+- 스킬은 여러 SkillEffect를 가질 수 있다(허용).
+- 실행 시 effects[]를 순서대로 적용한다.
+
+예
+- Fireball:
+  - DealDamageEffect
+  - BurnApplyEffect
+
+권장 적용 순서(기본)
+1) Direct Damage / Heal
+2) Status Apply
+3) Forced Movement (Pull/Knockback/Teleport 등)
+4) Secondary procs (추후)
+
+============================================================
+8. StatusEffect 상호작용 (Status / Stacking)
+============================================================
+스킬은 상태이상을 적용할 수 있다.
+
+스태킹 정책(현재 결정)
+- Strongest Only 기본
+  - 동일 타입 상태가 새로 들어오면:
+    - 더 강하면 교체(replace)
+    - 같거나 약하면 무시(ignore)
+  - (선택 옵션) 같은 강도면 duration refresh:
+    - UX/플레이 감각상 “유지”의 의미가 생김
+  - 본 문서 v0.2 기본값:
+    - stronger => replace
+    - equal/weaker => ignore
+    - (추후 필요 시 equal => refreshDuration 옵션 도입 권장)
+
+============================================================
+9. 스킬 실행 파이프라인 (Execution Pipeline)
+============================================================
+스킬 효과 적용 타이밍
+- AnimationEventRelay의 AttackHit 이벤트 시점에 적용 (확정)
+
+표준 흐름
+1) Skill 선택
+2) Preview (range/target overlay)
+3) Confirm (클릭/자동 선택)
+4) AP(cost) 검증: CurrentAP >= costAP
+5) Animation Start
+6) AnimationEvent: AttackHit
+7) ResolveTargets() 결과에 대해 SkillEffect 체인 적용
+8) AnimationEvent: AttackEnd (또는 애니 끝)
+9) Turn End
+
+============================================================
+10. UX 규칙 (Preview / Input)
+============================================================
+공통 목표
+- Preview와 Confirm의 결과 일치(보이는 대로 맞아야 함)
+
+ClickSingle
+- Preview: 사거리(+LOS) 만족 유닛 표시
+- Click: 대상 확정
+- FriendlyFire 개념 없음(단일 선택이므로)
+
+ClickTileAOE
+- Range overlay: 중심으로 선택 가능한 타일 표시
+- Hover: aoeRadius AOE 범위 표시
+- Click: 중심 타일 확정
+- FriendlyFire ON이므로, AOE 프리뷰에 “아군도 위험 표시”를 반드시 포함(표현 방식은 UX 문서에서 확정)
+
+AP 표시(권장)
+- 유닛 HUD에 CurrentAP / MaxAP 노출
+- 스킬 버튼/툴팁에 costAP 노출
+- (선택) 선택한 행동을 수행했을 때의 “남는 AP” 프리뷰
+
+============================================================
+11. AI 연동 (AIPlanner) — 추천 스킬 선택 기준
+============================================================
+AI는 “Expected Utility” 최대화를 목표로 한다.
+AP 시스템에서는 “효율(효과 / cost)”이 핵심이 된다.
+
+추천 평가 항목(가중치)
+(+) ExpectedDamageTotal
+(+) ExpectedKillValue (확정 처치 큰 보너스)
+(+) TargetCountValue (AOE 타겟 수)
+(+) StatusValue (DOT/제어의 기대값)
+(-) FriendlyFirePenalty (아군 예상 피해량 * 중요도 가중)
+(-) ThreatExposurePenalty (공격/이동 후 맞을 위험)
+(-) CostPenalty (비싼 스킬의 기회비용)
+
+AP 저축과 관련된 고려(권장)
+- “현재 턴에 굳이 쓰지 않고 AP를 남기는 선택”이 존재하므로,
+  - 미래 턴의 폭발 가능성(버스트)을 과대평가하지 않도록 주의
+  - 완전 이월(1.0)일수록 “대기 메타” 위험이 커지므로,
+    - AI에도 “즉시 이득” 가중치를 조금 더 주는 편이 안정적
+
+ClickTileAOE 최적화(필수)
+- 중심 타일 후보를 전수 조사하면 비싸다.
+- 휴리스틱(권장):
+  - 적 주변 타일(반경 0~aoeRadius)을 후보로
+  - 또는 사거리 내 타일 랜덤 샘플링 + 상위 K refinement
+- AI 타겟 계산은 반드시 ResolveTargets()와 동일 규칙 사용(불일치 금지)
+
+============================================================
+12. 스킬 타입/태그 추천 (확장성)
+============================================================
+추천 타입
+- Damage
+- Heal
+- Buff
+- Debuff
+- Control (Stun/Root/Slow 등)
+- Movement (Dash/Knockback/Pull/Teleport 등)
+- Summon (추후)
+- Terrain (장판/지형 상호작용: Burn tile 등)
+
+추천 태그
+- RequiresLOS / IgnoresLOS
+- FriendlyFire / NoFriendlyFire
+- SingleTarget / AOE
+- Direct / DOT
+- Finisher(처치 보너스용), Utility(비전투적) 등
+
+============================================================
+13. Ultimate 규칙
+============================================================
+현재 결정
+- “Ultimate”를 별도 시스템으로 강제하지 않는다.
+- 일반 스킬과 동일 구조(SkillData + costAP + effects)로 취급 가능.
+
+============================================================
+14. TODO / 구현 체크리스트
+============================================================
+- SkillData에 costAP 추가 및 UI 노출
+- 유닛에 MaxAP/RegenAP/CurrentAP 추가, 턴 시작 회복 처리
+- (선택) CarryOverRate(이월 감쇠) 도입 여부 결정
+- MoveCost 적용(이동 1회 cost vs 타일당 cost) 결정
+- requiresLineOfSight 구현 및 타겟/타일 검증 통합
+- Status stackingPolicy(StrongestOnly) 구현 + (선택) equal refresh 옵션
+- AIPlanner에 FriendlyFirePenalty, 효율(utility/cost) 반영
+- ClickTileAOE 중심 타일 후보 탐색 휴리스틱 적용

@@ -1,0 +1,316 @@
+# UX_RULES.txt v0.4
+
+## 목적
+
+본 문서는 현재 전투 시스템의 실제 동작 기준 UX 규칙을 정의한다.
+Preview / Input / Execution / Feedback은 반드시 동일한 규칙을 공유해야 한다.
+
+---
+
+# 1. 핵심 UX 원칙
+
+* Preview 결과와 실제 실행 결과는 반드시 동일해야 한다.
+* Invalid 상황은 별도의 타일 표시 없이 명시적 피드백으로 전달한다.
+* Selected는 모든 상호작용의 기본 피드백이다.
+* Hover와 Click은 동일한 규칙 체계를 공유한다.
+* Player / AI / Preview는 동일한 타겟 판정 규칙을 사용한다.
+
+---
+
+# 2. 입력 구조
+
+## Input Mode
+
+```plaintext
+Move
+SkillPreview
+```
+
+실제 UX 상태는 다음 요소 조합으로 결정된다:
+
+* PlannedMove 존재 여부
+* PlannedSkill 존재 여부
+* Target Lock 여부 (clickedTile / clickedUnit)
+* HoverTile 존재 여부
+
+---
+
+# 3. Action Queue 규칙
+
+```plaintext
+Move (0~1회)
+Skill (0~N회, AP 기반)
+```
+
+* Move는 AP를 소모하지 않는다.
+* Skill은 AP 기반으로 여러 번 사용 가능하다.
+* ActionQueue 최대 길이 제한 없음 (AP 기반)
+
+## Confirm 규칙
+
+* 아무 행동 없음 → 턴 종료
+* Move만 있음 → 이동 후 Skill 입력 단계 유지
+* Skill 사용 → AP가 남아있으면 계속 행동 가능
+* AP가 0이거나 행동 불가 상태 → 턴 종료
+
+---
+
+# 4. Cancel 규칙
+
+Cancel은 단계적으로 되돌린다:
+
+1. Target Lock 해제
+2. Planned Skill 해제
+3. Planned Move 해제
+
+* ESC / 우클릭 동일 동작
+* Hover preview도 함께 정리됨
+
+---
+
+# 5. PreviewPosition 규칙
+
+```plaintext
+previewPosition =
+    PlannedMoveTile 있으면 해당 위치
+    없으면 actor.GridPos
+```
+
+다음 모든 계산은 previewPosition 기준:
+
+* Range
+* LOS
+* Target 판정
+* Self-target
+
+---
+
+# 6. Move UX
+
+## Hover
+
+* 모든 hover 타일에 Selected 표시
+
+* 유효한 경우:
+
+  * Actionable 표시
+  * Path 표시
+  * Hazard Path 표시
+
+* 무효한 경우:
+
+  * Selected만 표시
+
+## Planned Move
+
+* Selected = 이동 목적지
+* Planned Path 표시 유지
+* Hazard Path 표시 유지
+
+## Move 이후
+
+* Move는 1회만 가능
+* 이후 SkillPreview 단계로 전환
+
+---
+
+# 7. Skill UX
+
+## 공통
+
+* Hover 시 항상 Selected 표시
+* Invalid Overlay 없음
+* 실패는 메시지 기반 처리
+
+---
+
+## ClickSingle
+
+* 타일 클릭 기반 타겟팅
+* 클릭 타일 → 유닛 resolve
+
+### Self Target
+
+* previewPosition == clickedTile → self-target 허용
+
+---
+
+## ClickTileAOE
+
+* 중심 타일 Selected 표시
+* Cast 가능 시 Actionable 표시
+* PreviewArea로 실제 범위 표시
+
+### Target 표시
+
+* 적 → Target FX
+* 아군 → FriendlyFire FX
+
+### 중요
+
+* 타겟이 없어도 Cast 가능 (center가 유효하면)
+
+---
+
+## Auto / All 계열
+
+* ResolveTargets 기반 자동 계산
+* PreviewArea + Target 표시
+
+---
+
+# 8. Hover vs Target Lock
+
+## Hover
+
+* Selected 표시됨
+
+## Target Lock 상태
+
+* 고정 Selected만 표시
+* Hover Selected는 표시되지 않음
+
+→ UX 안정성 확보
+
+---
+
+# 9. Highlight 시스템
+
+## 구조
+
+```plaintext
+Base Overlay
++ FX Overlay
+```
+
+---
+
+## Base Overlay
+
+* Move
+* SkillRange
+* PreviewArea
+
+우선순위:
+
+```plaintext
+PreviewArea > SkillRange > Move
+```
+
+---
+
+## FX Overlay
+
+* Selected
+* Actionable
+* TargetHit
+* FriendlyFire
+* Hazard
+
+---
+
+## Invalid
+
+* 존재하지 않음
+
+---
+
+# 10. 색상 규칙
+
+(현재 유지)
+
+* Move = Blue
+* Castable = Red
+* PreviewArea = Orange
+
+※ 의미 전달은 색상 단독이 아니라
+Base + FX 조합으로 수행
+
+---
+
+# 11. Hazard UX
+
+* Move Hover Path에서만 표시
+* Planned Path에서도 표시
+* 평상시 표시하지 않음
+
+---
+
+# 12. HUD 규칙
+
+## 기본 표시
+
+* HP
+* AP
+
+## Target 표시
+
+* UnitHud targetIndicator 사용
+
+---
+
+## AP 부족
+
+* 버튼 색상 변화
+* 버튼 shake
+* HUD AP 피드백
+
+추후:
+
+* 메시지
+* 사운드 추가 가능
+
+---
+
+# 13. 상태이상 UX
+
+## 기본 방향
+
+* 월드 이펙트 중심
+
+예:
+
+* Burn → 불꽃
+* Poison → 연기
+* Stun → 별
+
+## HUD
+
+* 상태 아이콘은 상세보기에서 표시
+
+---
+
+# 14. Preview Actor (Movement)
+
+* PreviewActor 사용
+* 원본 유닛 → 반투명
+* Preview 위치 → 원본 복제
+
+---
+
+# 15. 실패 피드백
+
+Overlay 대신 메시지 사용:
+
+* AP 부족
+* 사거리 밖
+* LOS 차단
+* 유효한 대상 없음
+* 이동 불가
+* 높이 제한
+* 행동 불가
+
+---
+
+# 16. 확정 UX 요약
+
+* Hover = 항상 Selected
+* Invalid = 표시 없음
+* Target Lock > Hover
+* Preview = 실제 결과와 동일
+* Move는 1회, Skill은 AP 기반
+* 상태이상 = 월드 이펙트 중심
+
+---
+
+END

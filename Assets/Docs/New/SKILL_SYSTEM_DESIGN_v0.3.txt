@@ -1,0 +1,443 @@
+# SKILL_SYSTEM_DESIGN v0.3
+
+## 목적
+
+본 문서는 스킬 시스템의 실제 설계 규칙을 정의한다.
+스킬은 전투 UX, 실행 로직, AI 평가, 로그라이크 업그레이드와 동일한 기준을 공유해야 한다.
+
+핵심 원칙:
+
+* Preview와 Execution은 반드시 동일해야 한다.
+* 스킬은 AP 기반 행동 경제를 따른다.
+* 타겟 규칙은 스킬 효과 추론이 아니라 명시적 정의를 우선한다.
+* AI는 플레이어와 동일한 타겟 판정 규칙을 사용해야 한다.
+
+참조 시스템:
+
+* 현재 타겟 모드 구조와 SkillData 스펙 
+* ResolveTargets 중심의 타겟 판정 규칙 
+* AP 기반 스킬 평가 및 AI 점수화 구조
+
+---
+
+# 1. 캐릭터 스킬 구조
+
+기본 캐릭터 능력 구조:
+
+```plaintext
+Passive x1
+Unique Skill x2
+Common Skill x1
+```
+
+의도:
+
+* 캐릭터 정체성은 고유 스킬 2개로 유지한다.
+* 공용 스킬 1개로 로그라이크식 빌드 변화를 만든다.
+* 패시브는 캐릭터 테마를 고정하는 축이다.
+
+## 1.1 설계 방향
+
+* 고유 스킬 = 캐릭터 아이덴티티
+* 공용 스킬 = 런마다 변하는 확장 슬롯
+* 패시브 = 플레이 스타일 고정축
+
+---
+
+# 2. 스킬 획득 구조
+
+로그라이크 스킬 획득은 다음 둘을 모두 사용한다.
+
+```plaintext
+전투 후 선택
+상점 / 업그레이드
+```
+
+## 2.1 전투 후 선택
+
+* 기본 구조: 3개 중 1개 선택
+* 보상 종류:
+
+  * 새 공용 스킬
+  * 기존 스킬 강화
+  * 패시브 관련 보너스
+  * 아이템성 효과
+
+## 2.2 상점 / 업그레이드
+
+* 스킬 교체
+* 특정 스킬 강화
+* 특수 효과 부여
+* 빌드 방향 보정
+
+---
+
+# 3. 행동 경제 (AP)
+
+## 3.1 기본 규칙
+
+* 스킬은 AP를 소비한다.
+* AP가 허용하는 한 한 턴에 여러 번 스킬 사용 가능하다.
+* 별도 쿨다운은 기본 설계에 포함하지 않는다.
+
+```plaintext
+Skill usage limit = AP only
+```
+
+## 3.2 이유
+
+* 빠른 전투 템포
+* 로그라이크 업그레이드와 높은 궁합
+* 복잡한 쿨다운 관리 없이 빌드 폭발력 제공
+
+## 3.3 Move와의 관계
+
+전투 구조는 다음을 따른다.
+
+```plaintext
+Move = 0~1회
+Skill = AP 기반 N회
+```
+
+* Move는 AP를 소모하지 않는다.
+* Move 이후 Skill 사용 가능
+* Skill 이후 Move는 불가
+* 포지셔닝 전략을 먼저 결정한 뒤 스킬 연쇄를 수행하는 구조를 유지한다.
+
+---
+
+# 4. 스킬 카테고리
+
+모든 스킬은 다음 분류 중 하나 이상을 가진다.
+
+```plaintext
+Damage
+AOE
+Buff
+Debuff
+Utility
+```
+
+## 4.1 목적
+
+* AI 평가 단순화
+* 스킬 설명 명확화
+* 업그레이드 분기 설계 용이
+* 로그라이크 보상 분류 용이
+
+## 4.2 예시
+
+* Fireball = Damage + AOE + Debuff
+* Heal = Buff / Utility
+* Push Shot = Damage + Utility
+* Guard Aura = Buff
+
+---
+
+# 5. 타겟 모드
+
+기존 타겟 구조는 유지하되 확장 가능 구조로 전환한다.
+
+## 5.1 기본 타겟 모드
+
+현재 기준 지원 / 유지 대상:
+
+* AutoNearestEnemy
+* ClickSingleEnemy
+* ClickSingleAlly
+* ClickSingleAny
+* ClickTileAOE
+* AllEnemiesInRange
+* AllEnemiesAnywhere
+* AllAlliesInRange
+* AllAlliesAnywhere
+
+기존의 포괄적 ClickSingle은 장기적으로 분해하는 것을 권장한다.
+이유:
+
+* UX가 더 명확해진다.
+* self-target 허용 여부를 따로 제어할 수 있다.
+* AI가 대상 관계를 더 명시적으로 해석할 수 있다.
+* “아군 단일 대상이지만 자기 자신은 불가” 같은 규칙을 쉽게 정의할 수 있다.
+
+## 5.2 패턴형 타겟 모드 (확장 예정)
+
+향후 정식 지원 대상:
+
+* ClickDirectionLine
+* ClickDirectionFront3
+* ClickCone
+* ClickCross
+* ClickPatternAOE
+
+예시:
+
+```plaintext
+Front3 = 전방 1x3
+Line = 직선 관통
+Cone = 원뿔 범위
+```
+
+이 계열은 ClickTileAOE 억지 응용이 아니라 별도 타겟 패턴 규칙으로 정의한다.
+
+---
+
+# 6. Self-target 규칙
+
+Self-target 허용은 타겟 모드와 별개로 정의한다.
+
+권장 필드:
+
+```plaintext
+canTargetSelf = true / false
+```
+
+## 6.1 원칙
+
+* 아군 대상 스킬이라고 해서 자동으로 self-target 가능이 아니다.
+* 힐/버프라도 자기 자신에게 못 쓰는 스킬이 존재할 수 있다.
+* self-target 가능 여부는 명시적으로 정의한다.
+
+## 6.2 예시
+
+* Self Heal: ClickSingleAlly + canTargetSelf = true
+* Bless Other: ClickSingleAlly + canTargetSelf = false
+* Assassinate: ClickSingleEnemy + canTargetSelf = false
+
+---
+
+# 7. Friendly Fire
+
+Friendly Fire는 전역 규칙이 아니라 스킬별 규칙으로 처리한다.
+
+## 7.1 기본 정책
+
+```plaintext
+Friendly Fire = skill-specific
+```
+
+## 7.2 방향
+
+* 현재는 일부 스킬에만 허용
+* 장기적으로는 제한적으로 사용
+* 지나친 Friendly Fire 강제는 속도감, 파괴감, 쾌감과 충돌할 수 있으므로 메인 설계로 삼지 않는다
+
+## 7.3 적용 예시
+
+* 폭발형 스킬: 허용 가능
+* 표준 AOE 딜 스킬: 대부분 비허용 가능
+* 제어형 장판: 상황별 허용 가능
+
+---
+
+# 8. 사거리 / LOS / 실패 처리
+
+## 8.1 기본 규칙
+
+다음 조건 미충족 시 스킬은 실행되지 않는다.
+
+* AP 부족
+* 사거리 밖
+* LOS 차단
+* 유효한 대상 없음
+* 타겟 모드 조건 불충족
+
+이 원칙은 현재 전투 규칙과 동일하다. 
+
+## 8.2 설계 이유
+
+* Preview와 실제 실행 일치
+* 명확한 사용자 기대 형성
+* AI와 플레이어 규칙 일치 유지
+
+## 8.3 예외 스킬
+
+향후 일부 스킬은 “예외 실행형”으로 별도 태그를 둘 수 있다.
+
+예:
+
+* 적이 없으면 자신에게만 보호막
+* 대상이 없으면 빈 타일 장판 설치
+* 조건 일부 미충족 시 약화된 효과 발동
+
+이런 스킬은 기본 규칙 예외로 명시적으로 설계한다.
+기본 스킬 시스템 자체를 예외 중심으로 만들지 않는다.
+
+---
+
+# 9. AOE / 패턴 범위
+
+## 9.1 기본 AOE
+
+* 중심 타일 지정
+* 범위 내 전체 타겟 처리
+* 범위 규칙은 Preview와 Execution에서 동일해야 한다
+
+## 9.2 패턴형 범위
+
+향후 도입할 패턴형 스킬은 다음 개념을 사용한다.
+
+* Shape
+* Orientation
+* Origin rule
+* Rotation rule
+
+예:
+
+* 전방 1x3
+* 직선 4칸
+* 십자형
+* 원뿔형
+
+이들은 타일 클릭 기반 AOE와 구분되는 별도 패턴 시스템으로 정의한다.
+
+---
+
+# 10. 스킬 강화 시스템
+
+로그라이크 강화는 두 가지를 모두 사용한다.
+
+```plaintext
+수치 강화
+효과 추가
+```
+
+## 10.1 수치 강화 예
+
+* Damage +
+* Range +
+* AOE Radius +
+* AP Cost 감소
+* Status Duration +
+
+## 10.2 효과 추가 예
+
+* Burn 추가
+* Push 추가
+* Chain 추가
+* Shield 부여 추가
+* Pierce / Splash 추가
+
+## 10.3 강화 구조
+
+강화는 다음 둘을 모두 지원한다.
+
+```plaintext
+같은 스킬 반복 강화
+업그레이드 분기
+```
+
+예:
+
+* Fireball → Damage Up
+* Fireball → Burn Add
+* Fireball → Explosive Split
+
+---
+
+# 11. SkillEffect 구조
+
+스킬은 여러 효과를 순서대로 가진다.
+
+## 11.1 기본 구조
+
+* Direct Damage
+* Heal
+* Status Apply
+* Forced Movement
+* Secondary effect
+
+현재 SkillEffect 체인 구조는 유지 가치가 높다.
+
+## 11.2 설계 원칙
+
+* 하나의 스킬은 복합 효과 가능
+* 순서가 중요한 효과는 체인 순서로 제어
+* 업그레이드는 수치 변경 또는 effect 추가 방식으로 확장
+
+---
+
+# 12. AI 연동
+
+## 12.1 기본 원칙
+
+AI는 현재처럼 점수 기반 선택을 유지한다.
+
+이유:
+
+* 이미 피해, 처치, 상태, 아군 피해, hazard, AP를 통합 평가 가능
+* 로그라이크 강화 이후에도 확장성이 높다
+* 규칙 기반보다 유지보수성이 좋다
+
+## 12.2 강화 방향
+
+AI를 더 복잡하게 만들기보다, 다음 정보를 더 잘 읽게 한다.
+
+* 스킬 카테고리
+* 타겟 관계
+* self-target 허용 여부
+* Friendly Fire 허용 여부
+* 패턴형 범위 정보
+* 업그레이드 태그
+
+현재 AI는 이미 기대 피해, 상태 가치, 위험도, Friendly Fire를 평가한다. 
+
+---
+
+# 13. UX 규칙 연결
+
+스킬 UX는 별도 UX_RULES를 따른다. 핵심 연결 규칙만 명시한다.
+
+* Hover와 Confirm은 동일한 결과를 보여야 한다
+* Selected는 기본 피드백이다
+* Invalid Overlay는 사용하지 않는다
+* Explicit target lock이 Hover보다 우선한다
+* PreviewPosition 기준으로 Range / LOS / Target를 판단한다
+
+---
+
+# 14. 현재 구현에서 유지할 것 / 바꿀 것
+
+## 유지
+
+* AP 기반 다중 스킬 사용
+* ResolveTargets 중심 구조
+* 스킬별 Friendly Fire 설정
+* 다중 SkillEffect 체인
+* 점수 기반 AI 평가
+
+## 확장
+
+* ClickSingle 분리
+* 패턴형 타겟 모드 추가
+* self-target 허용을 별도 필드로 분리
+* 로그라이크 강화 태그 추가
+* 스킬 카테고리 정식화
+
+---
+
+# 15. 다음 구현 우선순위
+
+```plaintext
+1. 타겟 모드 분해
+2. self-target 필드 분리
+3. 패턴형 스킬 지원
+4. 스킬 카테고리 태그 추가
+5. 로그라이크 강화 연결
+```
+
+---
+
+# 16. 핵심 요약
+
+```plaintext
+- 스킬은 AP 기반으로 여러 번 사용 가능
+- Move는 먼저만 가능하고 AP를 소모하지 않음
+- ClickSingle은 Enemy / Ally / Any로 분해하는 방향이 좋음
+- self-target은 별도 필드로 제어
+- Friendly Fire는 스킬별 정책
+- 강화는 수치 증가 + 효과 추가 + 분기 강화 모두 지원
+- AI는 점수 기반 유지
+```
+
+END

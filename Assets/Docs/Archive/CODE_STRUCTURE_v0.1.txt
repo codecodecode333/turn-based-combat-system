@@ -1,0 +1,261 @@
+CODE_STRUCTURE.txt
+(Isometric Tactical Combat — Code Structure)
+
+Version: Snapshot v0.1
+Date: 2026-03-07
+
+============================================================
+
+1. Overview
+   ============================================================
+
+This document describes the runtime code structure of the project.
+
+The goal is to help developers and AI tools quickly understand:
+
+* what each core script does
+* how systems are connected
+* which files control combat flow
+
+Only **core runtime scripts** are listed here.
+
+============================================================
+2. Core Combat Flow
+===================
+
+Main execution order
+
+BattleController
+↓
+BattleInput (player)
+↓
+GridManager (movement / tiles)
+↓
+SkillData + SkillEffect
+↓
+Unit state changes
+↓
+AIPlanner (enemy decision)
+
+BattleController orchestrates the entire combat system.
+
+============================================================
+3. Core Scripts
+===============
+
+---
+
+## BattleController
+
+Role
+
+Main battle manager.
+
+Responsibilities
+
+* Turn order management
+* Player turn flow
+* Enemy turn flow
+* Skill execution
+* Animation timing
+* Calling AIPlanner
+
+Controls overall combat loop.
+
+---
+
+## BattleInput
+
+Role
+
+Handles player input.
+
+Responsibilities
+
+* Mouse click detection
+* Tile selection
+* Skill targeting
+* Hover preview
+* Sending commands to BattleController
+
+Works together with
+
+Tile highlight system
+Skill preview system
+
+---
+
+## GridManager
+
+Role
+
+Grid and movement logic.
+
+Responsibilities
+
+* Grid coordinate system
+* Grid → world position conversion
+* Tile occupancy tracking
+* BFS movement range
+* Pathfinding
+* Movement coroutine
+
+Example
+
+GetReachableCosts()
+calculates reachable tiles using BFS.
+
+Used by
+
+BattleController
+AIPlanner
+Movement preview system
+
+---
+
+## Unit
+
+Role
+
+Represents a combat unit.
+
+Responsibilities
+
+* HP
+* stats
+* statuses
+* skill list
+* grid position
+* animation state
+
+Referenced by
+
+BattleController
+GridManager
+SkillEffect
+AIPlanner
+
+---
+
+## SkillData
+
+Role
+
+Defines a skill using ScriptableObject.
+
+Contains
+
+skillName
+animationTrigger
+effects
+targetMode
+range
+AOE radius
+
+Used by
+
+BattleController
+BattleInput
+AIPlanner
+
+---
+
+## SkillEffect
+
+Role
+
+Defines the actual effect of a skill.
+
+Each skill may contain multiple effects.
+
+Example
+
+DamageEffect
+ApplyBurnEffect
+
+---
+
+## AIPlanner
+
+Role
+
+Enemy decision making system.
+
+Responsibilities
+
+* Evaluate possible actions
+* Choose best skill + move combination
+* Use utility scoring
+
+Evaluates
+
+Move tile
+Skill
+Target
+
+Returns
+
+ActionCandidate
+
+---
+
+## AIProfile
+
+Role
+
+AI configuration file.
+
+Defines
+
+utility weights
+mistake chance
+range preferences
+evaluation limits
+
+Allows different AI behavior profiles.
+
+============================================================
+4. System Dependencies
+======================
+
+BattleController
+├── BattleInput
+├── GridManager
+├── Unit
+├── SkillData
+└── AIPlanner
+
+BattleInput
+├── BattleController
+└── GridManager
+
+AIPlanner
+├── GridManager
+├── SkillData
+└── Unit
+
+SkillData
+└── SkillEffect
+
+============================================================
+5. Key Design Rule
+==================
+
+Preview logic and execution logic must share the same rules.
+
+The following systems must remain consistent:
+
+* Skill targeting
+* Range calculation
+* LOS validation
+* AOE target resolution
+
+These rules must be shared between
+
+Player preview
+BattleController execution
+AIPlanner evaluation
+
+============================================================
+End of File
+===========

@@ -1,0 +1,109 @@
+TILE_SYSTEM_DESIGN.txt
+(Isometric Tactical Combat — Tile System Design + Height)
+
+버전: Draft v0.2 (2026-03-05)
+핵심: Height(고저) 개념은 "이동"에만 적용. LOS/사거리/AOE는 v0.2에서 영향 없음.
+
+============================================================
+1) 타일의 역할
+============================================================
+타일(Tile)은 전투에서 다음을 결정한다.
+- 이동 가능 여부 (Passable / Blocked)
+- 점유(Occupied) 여부
+- 시야/탄도 차단 (LOS Blocking)  [※ Height와 무관, 벽/장애물 속성으로만 처리]
+- 위험/효과 (Hazard: Burn/Poison 등)
+- 높이(HeightLevel): 이동 제약 및 이동 비용에만 영향
+
+============================================================
+2) Tile Data (권장 필드)
+============================================================
+- tileType: Normal / Wall / Obstacle / Hazard_Burn / Hazard_Poison / ...
+- passable: bool
+- blocksLOS: bool
+- heightLevel: int (기본 0, 1, 2...)
+- hazardType: None / Burn / Poison ...
+- hazardPower: int (옵션)
+- hazardDuration: int (옵션)
+
+============================================================
+3) Height 규칙 (Movement Only)
+============================================================
+Height 정의
+- 각 타일은 heightLevel을 가진다.
+- 이동 시 높이차 dh = target.heightLevel - current.heightLevel
+
+고저 이동 허용(클래스/유닛별)
+- 각 유닛은 "MaxClimbDelta"를 가진다. (한 번 이동에서 허용되는 최대 높이차)
+  - 예) Rogue: MaxClimbDelta = 2
+  - 그 외 클래스: MaxClimbDelta = 1
+
+이동 가능 조건(Height 관련)
+- abs(dh) <= MaxClimbDelta  일 때만 이동 가능
+- abs(dh) >  MaxClimbDelta  이면 이동 불가
+
+============================================================
+4) 이동 비용 (Height Cost)
+============================================================
+기본: 이동은 AP(cost)를 소비한다. (AP 시스템과 연동)
+
+MoveCost 기본 구조
+- MoveBaseCost: 기본 이동 비용(예: 1 AP)
+- HeightMoveExtraCost: 높이차로 인한 추가 비용
+
+HeightMoveExtraCost 정책 (둘 중 하나 선택)
+A) HeightMoveExtraCost = abs(dh)
+B) HeightMoveExtraCost = (dh != 0) ? 1 : 0
+
+최종 이동 비용
+- MoveCost = MoveBaseCost + HeightMoveExtraCost
+
+권장값(초기)
+- MoveBaseCost = 1
+- HeightMoveExtraCost = A (abs(dh))  [고저를 더 “명확한 비용”으로 느끼게 함]
+  단, 맵이 계단/언덕이 많아 이동이 답답하면 B로 완화.
+
+============================================================
+5) BFS 이동 범위 계산 (GridManager 연동 포인트)
+============================================================
+GetReachableCosts() / BFS 확장에서 다음을 고려한다.
+
+- 이웃 타일로 확장할 때:
+  1) passable 확인
+  2) occupied 확인
+  3) height 체크: abs(dh) <= MaxClimbDelta
+  4) cost 누적: + MoveCost(해당 이동의 비용)
+
+주의
+- 기존 moveRange(타일 수 기반)에서 AP 기반(cost 기반)으로 확장하려면
+  BFS의 “거리”가 아니라 “비용” 기반 탐색(Dijkstra 스타일)이 필요할 수 있음.
+  (단, MoveCost가 1~3 정도의 작은 정수면 현재 BFS도 약간 확장해서 운용 가능)
+
+============================================================
+6) LOS / AOE / Range와 Height 관계
+============================================================
+v0.2에서는 Height가 다음에 영향을 주지 않는다.
+- 스킬 사거리(Manhattan)
+- LOS(벽/장애물만 차단)
+- AOE(2D Manhattan Disk)
+
+(추후 확장 가능)
+- 높은 지형에서 LOS 보너스
+- 고저차에 따른 피해 증감
+- 낙하/밀치기 상호작용 등
+
+============================================================
+7) Hazard(위험 타일) 규칙
+============================================================
+- Hazard는 “타일이 부여하는 피해/상태”다.
+- 기본 발동 타이밍: 턴 시작(OnTurnStart)
+
+AI 연동
+- AI는 HazardTilePenalty를 크게 부여하여 위험 타일을 회피한다.
+- Height는 v0.2에서 이동에만 영향이므로, AI는 위험 타일 회피를 우선한다.
+
+============================================================
+8) TODO
+============================================================
+- Height 시각화/표현(타일 스프라이트/오클루전)
+- 이동 경로 프리뷰가 고저 비용을 반영하도록 개선
+- Dijkstra 기반 비용 탐색으로 이동 범위 계산 정교화

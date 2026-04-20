@@ -18,8 +18,16 @@ public sealed class BurnStatus : StatusEffect
         }
 
         if (power > 0)
+        {
             target.TakeDamage(power);
 
+            // 👉 Tick FX
+            var fx = target.GetComponent<UnitFxPlayer>();
+            if (fx != null)
+            {
+                fx.PlayBurnTickFx();
+            }
+        }
         TickDuration();
     }
 }

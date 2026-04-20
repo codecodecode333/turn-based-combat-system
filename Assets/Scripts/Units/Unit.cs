@@ -48,6 +48,8 @@ public class Unit : MonoBehaviour
     private Vector3 baseVisualLocalPos;
     private Coroutine hitCo;
 
+    private UnitFxPlayer fxPlayer;
+
     // === BattleController가 구독할 이벤트 ===
     public event Action AttackHitEvent;
     public event Action AttackEndEvent;
@@ -67,6 +69,7 @@ public class Unit : MonoBehaviour
     public Vector2Int GridPos { get; private set; }
     public bool isAlly;
     float baseVisualScaleX = 1f;
+    
 
 
     void LateUpdate()
@@ -99,6 +102,9 @@ public class Unit : MonoBehaviour
 
         //AP
         currentAP = regenAP;
+
+        if (fxPlayer == null)
+            fxPlayer = GetComponent<UnitFxPlayer>();
     }
     void OnDrawGizmos()
     {
@@ -158,6 +164,12 @@ public class Unit : MonoBehaviour
         // 3) 남은 피해만 HP에 반영
         currentHP -= finalDamage;
         if (currentHP < 0) currentHP = 0;
+
+        if (fxPlayer != null)
+        {
+            fxPlayer.PlayHitFx();
+            fxPlayer.PlayDamageText(finalDamage);
+        }
 
         PlayHit();
 
@@ -295,6 +307,7 @@ public class Unit : MonoBehaviour
             if (s.IsExpired)
             {
                 s.OnRemove(this);
+                OnStatusRemovedFx(s);
                 statusEffects.RemoveAt(i);
                 changed = true;
             }
@@ -325,6 +338,7 @@ public class Unit : MonoBehaviour
             if (s.IsExpired)
             {
                 s.OnRemove(this);
+                OnStatusRemovedFx(s);
                 statusEffects.RemoveAt(i);
                 changed = true;
             }
@@ -335,29 +349,38 @@ public class Unit : MonoBehaviour
     }
     public void AddOrRefreshStatus(StatusEffect incoming)
     {
-        if (incoming == null || IsDead) return;
+        if (incoming == null) return;
 
-        for (int i = 0; i < statusEffects.Count; i++)
+        // 이미 있는지 확인
+        var existing = statusEffects.Find(s => s.Id == incoming.Id);
+
+        if (existing != null)
         {
-            var cur = statusEffects[i];
-            if (cur == null)
-            {
-                statusEffects.RemoveAt(i);
-                i--;
-                statusRevision++;
-                continue;
-            }
-
-            if (cur.Id != incoming.Id)
-                continue;
-
-            cur.MergeFrom(incoming);
+            // 갱신(refresh) - FX 재생하지 않음
+            existing.MergeFrom(incoming);
             statusRevision++;
             return;
         }
 
+        // 새로 추가
         statusEffects.Add(incoming);
         incoming.OnApply(this);
+
+        // 👉 Apply FX (신규일 때만)
+        if (fxPlayer != null)
+        {
+            switch (incoming.Id)
+            {
+                case StatusId.Burn:
+                    fxPlayer.PlayBurnApplyFx();
+                    break;
+
+                case StatusId.Stun:
+                    fxPlayer.ShowStunLoopFx();
+                    break;
+            }
+        }
+
         statusRevision++;
     }
 
@@ -510,6 +533,19 @@ public class Unit : MonoBehaviour
                 s.OnRemove(this);
                 statusEffects.RemoveAt(i);
             }
+        }
+    }
+
+    void OnStatusRemovedFx(StatusEffect status)
+    {
+        if (fxPlayer == null || status == null)
+            return;
+
+        switch (status.Id)
+        {
+            case StatusId.Stun:
+                fxPlayer.HideStunLoopFx();
+                break;
         }
     }
 }

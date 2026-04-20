@@ -18,7 +18,8 @@ MonoBehaviour:
   effects:
   - {fileID: 11400000, guid: 0a67a08961e21d74ab692e9acd6089d9, type: 2}
   targetMode: 2
-  aoeRadius: 1
+  allowFriendlyFire: 1
+  aoeRadius: 2
   minRange: 1
   maxRange: 5
   requiresLineOfSight: 0

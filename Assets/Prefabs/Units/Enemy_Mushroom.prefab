@@ -11,6 +11,7 @@ GameObject:
   - component: {fileID: 8312706934649009221}
   - component: {fileID: 878450121371887986}
   - component: {fileID: 8890263833425687042}
+  - component: {fileID: 7940850746773950308}
   m_Layer: 0
   m_Name: Enemy_Mushroom
   m_TagString: Untagged
@@ -33,6 +34,7 @@ Transform:
   m_Children:
   - {fileID: 6168920936777790147}
   - {fileID: 5640695510647365218}
+  - {fileID: 3006319742934804203}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!114 &878450121371887986
@@ -118,6 +120,92 @@ BoxCollider2D:
   m_AutoTiling: 0
   m_Size: {x: 1, y: 1}
   m_EdgeRadius: 0
+--- !u!114 &7940850746773950308
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1036792281845079362}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 27896841df2f4c048af9a66fd11f9223, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::UnitFxPlayer
+  fxBodySocket: {fileID: 3278640427583259004}
+  fxHeadSocket: {fileID: 137037789551567941}
+  burnBodyPrefab: {fileID: 4574571030800446541, guid: f58cf54e3370d4e41a468444c6892452, type: 3}
+  burnHeadPrefab: {fileID: 1219026901989134974, guid: bbc006b0301686441886f132d8cbcfe9, type: 3}
+  burnTickBodyPrefab: {fileID: 0}
+  hitPrefab: {fileID: 2181703329087895170, guid: 15a1142229e95e844afb593822c29c5e, type: 3}
+  stunLoopPrefab: {fileID: 2437645426143670504, guid: f870f3ccf2cc90d4699c39a15e637260, type: 3}
+  useHeadFx: 0
+  damageTextPrefab: {fileID: 4104464436756278640, guid: 0117df43d481c124cb53a22c17b1fe2e, type: 3}
+  damageTextSocket: {fileID: 137037789551567941}
+--- !u!1 &4104530246439212156
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 137037789551567941}
+  m_Layer: 0
+  m_Name: FX_HeadSocket
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &137037789551567941
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4104530246439212156}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0.3, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 3006319742934804203}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &4175182888642046836
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 3006319742934804203}
+  m_Layer: 0
+  m_Name: FXRoot
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &3006319742934804203
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 4175182888642046836}
+  serializedVersion: 2
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children:
+  - {fileID: 3278640427583259004}
+  - {fileID: 137037789551567941}
+  m_Father: {fileID: 8312706934649009221}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &6363688238195617211
 GameObject:
   m_ObjectHideFlags: 0
@@ -245,6 +333,37 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: bd75098e98b5e0e418e9c829e9dc55f7, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::AnimationEventRelay
+--- !u!1 &8560173035962407523
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 3278640427583259004}
+  m_Layer: 0
+  m_Name: FX_BodySocket
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &3278640427583259004
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8560173035962407523}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0.3, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 3006319742934804203}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1001 &4728666327959666106
 PrefabInstance:
   m_ObjectHideFlags: 0

@@ -1,0 +1,201 @@
+# DEVELOPMENT_ROADMAP.txt v0.2
+
+## 프로젝트 상태 (2026-03-30 기준)
+
+현재 단계:
+
+```plaintext
+9차 목표: 전투 폴리싱 (초입)
+```
+
+완료된 핵심 시스템:
+
+* Move Ghost + Confirm UX
+* PreviewPosition 기반 프리뷰
+* ActionQueue 구조
+* AP 시스템
+* LOS
+* Height 이동 규칙
+* AI 1차 완성
+* Hazard 시스템
+* 상태이상 시스템 (로직)
+* Target Resolver 통합
+
+---
+
+# 핵심 전투 구조 (확정)
+
+```plaintext
+Move (0~1회, AP 없음)
+Skill (AP 기반 N회)
+```
+
+* Move → Skill만 가능
+* Skill 이후 Move 불가
+* AP가 허용하는 한 여러 스킬 사용 가능
+* Confirm 시 ActionQueue 실행
+
+---
+
+# 전투 UX 핵심 원칙
+
+* Preview = Execution 반드시 동일
+* Hover = 항상 Selected
+* Invalid Overlay 없음 (메시지 기반 피드백)
+* Target Lock > Hover
+* Base + FX Overlay 구조 유지
+* 상태이상 = 월드 이펙트 중심
+
+---
+
+# 9차 목표: 전투 폴리싱 (현재 진행 단계)
+
+## 9.1 UX 안정화 (진행 중)
+
+* [x] Hover Selected 통일
+* [x] Invalid Overlay 제거
+* [x] ClickSingle 타일 기반 전환
+* [x] Preview / Execution 일치
+* [x] ActionQueue UX 정리
+* [x] 실패 피드백 (텍스트 / 버튼 반응)
+
+---
+
+## 9.2 Highlight 시스템 완성
+
+* [ ] Base Overlay 색상 최종 확정
+* [ ] Selected FX 완성 (테두리 + sweep)
+* [ ] Target / FriendlyFire FX 강화
+* [ ] Hazard FX 시각 개선
+* [ ] Hover vs Locked Target 시각 분리 완성
+
+---
+
+## 9.3 상태이상 월드 이펙트 (다음 작업)
+
+목표:
+
+```plaintext
+상태이상 = HUD 아이콘 ❌
+상태이상 = 월드 FX ⭕
+```
+
+구현:
+
+* [ ] Burn FX
+* [ ] Poison FX
+* [ ] Stun FX
+* [ ] Freeze / Slow 간소 FX
+* [ ] 여러 상태 동시 표시 규칙 정의
+
+---
+
+## 9.4 HUD / 피드백 폴리싱
+
+* [ ] AP 부족 피드백 강화
+* [ ] Target Indicator 개선
+* [ ] UnitHud 위치 / 가독성 조정
+* [ ] 상태 상세보기 UI (선택사항)
+
+---
+
+## 9.5 Move / Preview Actor 완성
+
+* [ ] PreviewActor 시각 완성
+* [ ] 원본 유닛 반투명 처리 안정화
+* [ ] Ghost 완전 제거 여부 결정
+* [ ] 이동/스킬 전환 시 시각 자연스럽게 연결
+
+---
+
+## 9.6 UX 최종 정리
+
+* [ ] Cancel 흐름 완벽 검증
+* [ ] Move → Skill 흐름 완성
+* [ ] Skill 연속 사용 UX 검증
+* [ ] Edge case 제거
+
+---
+
+# 10차 목표: 전투 완성 (Finish Line)
+
+## 완료 기준
+
+```plaintext
+전투 시스템 완성 =
+UX + 시스템 + FX 완성
+```
+
+포함:
+
+* 모든 UX 흐름 자연스럽게 작동
+* 상태이상 FX 완성
+* AI 정상 동작
+* 버그 없음
+
+※ 밸런싱 제외
+
+---
+
+# 11차 목표: 로그라이크 시스템
+
+## 전투 이후 진행
+
+* [ ] 스킬 랜덤 획득
+* [ ] 스킬 강화 시스템
+* [ ] 패시브 시스템
+* [ ] 전투 리워드 구조
+
+---
+
+# 12차 목표: 밸런싱
+
+* [ ] 상태이상 밸런스
+* [ ] 스킬 밸런스
+* [ ] AI 난이도 조정
+
+※ 로그라이크 이후 진행
+
+---
+
+# 13차 목표: 메타게임
+
+* [ ] 캐릭터 성장
+* [ ] 장비 시스템
+* [ ] 진행 구조
+
+---
+
+# 리팩토링 전략
+
+```plaintext
+현재: 소규모 리팩토링만 병행
+전투 완성 후: 전체 리팩토링
+```
+
+---
+
+# 문서 관리 규칙
+
+```plaintext
+/docs/v2 = 최신 문서
+/docs/archive = 구버전
+```
+
+* 기존 문서 수정 ❌
+* v2 새 문서 생성 ⭕
+* archive 유지
+
+---
+
+# 현재 최우선 작업
+
+```plaintext
+1. 상태이상 월드 이펙트
+2. Highlight FX 완성
+3. PreviewActor 정리
+```
+
+---
+
+END
