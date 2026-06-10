@@ -465,7 +465,7 @@ public class GridManager : MonoBehaviour
 
     public TileView GetTileView(Vector2Int pos)
     {
-        var views = FindObjectsOfType<TileView>();
+        var views = FindObjectsByType<TileView>(FindObjectsSortMode.None);
 
         foreach (var v in views)
         {

@@ -307,7 +307,7 @@ public class BattleController : MonoBehaviour
         busy = false;
 
         if (!grid) grid = GridManager.I;
-        if (!tileHighlighter) tileHighlighter = FindObjectOfType<TileHighlighter>();
+        if (!tileHighlighter) tileHighlighter = FindFirstObjectByType<TileHighlighter>();
 
         foreach (var a in allies)
         if (a != null)
