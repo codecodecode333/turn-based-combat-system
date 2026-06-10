@@ -1,6 +1,7 @@
 using System.Collections;
 using TMPro;
 using UnityEngine;
+using UnityEngine.UI;
 
 public class UnitHud : MonoBehaviour
 {
@@ -21,6 +22,13 @@ public class UnitHud : MonoBehaviour
     public Color lowApColor = new Color(1f, 0.4f, 0.4f, 1f);
     public float apFlashDuration = 0.18f;
     public float apPunchScale = 1.15f;
+
+    [Header("Visual UI")]
+    public Image hpBarFill;
+    public Image[] apDots;
+
+    public Color apOnColor = new Color(1f, 0.85f, 0.2f, 1f);
+    public Color apOffColor = new Color(0.2f, 0.2f, 0.2f, 0.6f);
 
     Coroutine apFlashCo;
     Vector3 apTextBaseScale = Vector3.one;
@@ -53,6 +61,23 @@ public class UnitHud : MonoBehaviour
             if (t) targetIndicator = t.gameObject;
         }
 
+        if (!hpBarFill)
+        {
+            var t = transform.Find("Canvas/HpBarBg/HpBarFill");
+            if (t) hpBarFill = t.GetComponent<Image>();
+        }
+
+        if (apDots == null || apDots.Length == 0)
+        {
+            apDots = new Image[3];
+
+            for (int i = 0; i < apDots.Length; i++)
+            {
+                var t = transform.Find($"Canvas/ApRoot/AP_{i}");
+                if (t) apDots[i] = t.GetComponent<Image>();
+            }
+        }
+
         if (targetIndicator)
             targetIndicator.SetActive(false);
 
@@ -80,23 +105,33 @@ public class UnitHud : MonoBehaviour
 
     void RefreshHp()
     {
-        if (!hpText) return;
+        if (hpText)
+            hpText.text = $"HP {unit.currentHP}/{unit.maxHP}";
 
-        hpText.text = $"HP {unit.currentHP}/{unit.maxHP}";
+        if (hpBarFill)
+            hpBarFill.fillAmount = unit.maxHP > 0
+                ? unit.currentHP / (float)unit.maxHP
+                : 0f;
     }
 
     void RefreshAp()
     {
-        if (!apText) return;
+        if (apText)
+            apText.text = $"AP {unit.currentAP}/{unit.maxAP}";
 
-        apText.text = $"AP {unit.currentAP}/{unit.maxAP}";
+        if (apDots != null)
+        {
+            for (int i = 0; i < apDots.Length; i++)
+            {
+                if (!apDots[i]) continue;
 
-        if (unit.currentAP <= 0)
-            apText.color = new Color(1f, 0.4f, 0.4f);
-        else if (unit.currentAP < unit.maxAP)
-            apText.color = new Color(1f, 0.85f, 0.3f);
-        else
-            apText.color = Color.white;
+                bool on = i < unit.currentAP;
+                bool exists = i < unit.maxAP;
+
+                apDots[i].gameObject.SetActive(exists);
+                apDots[i].color = on ? apOnColor : apOffColor;
+            }
+        }
     }
 
     public void SetTargeted(bool on)

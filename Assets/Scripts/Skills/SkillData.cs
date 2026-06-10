@@ -28,6 +28,13 @@ public class SkillData : ScriptableObject
     public string animationTrigger;
     public SkillTiming timing;
 
+    [Header("Visual FX")]
+    public GameObject projectileFxPrefab;
+    public GameObject impactFxPrefab;
+
+    public Vector3 projectileStartOffset = new Vector3(0f, 0.25f, 0f);
+    public Vector3 projectileHitOffset = new Vector3(0f, 0.15f, 0f);
+
     [Header("Effect")]
     public SkillEffect[] effects;
 
@@ -49,4 +56,10 @@ public class SkillData : ScriptableObject
 
     [Header("Cost")]
     [Min(0)] public int costAP = 1;
+
+    [Header("UI")]
+    public Sprite icon;
+
+    [TextArea(2, 5)]
+    public string description;
 }

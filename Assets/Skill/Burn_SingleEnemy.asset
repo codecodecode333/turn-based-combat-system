@@ -15,11 +15,19 @@ MonoBehaviour:
   skillName: Burn_SingleEnemy
   animationTrigger: triggerAttack
   timing: 1
+  projectileFxPrefab: {fileID: 6759893679785636148, guid: a4b658bcba9d00446907f1a1afeb3ff0, type: 3}
+  impactFxPrefab: {fileID: 1590658815044798337, guid: 2b99472c6a6ecca4ba40ebc2229dd814, type: 3}
+  projectileStartOffset: {x: 0, y: 0.25, z: 0}
+  projectileHitOffset: {x: 0, y: 0.15, z: 0}
   effects:
   - {fileID: 11400000, guid: 38e5bb3a9365a9c4da770ea93d9d5c10, type: 2}
   targetMode: 1
+  allowFriendlyFire: 1
   aoeRadius: 0
   minRange: 1
   maxRange: 3
   requiresLineOfSight: 1
   costAP: 1
+  icon: {fileID: 0}
+  description: "\uD654\uC5FC\uAD6C\uB97C \uBC1C\uC0AC\uD558\uC5EC \uD53C\uD574\uB97C
+    \uC8FC\uACE0\nBurn\uC744 \uBD80\uC5EC\uD55C\uB2E4."

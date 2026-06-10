@@ -8,6 +8,8 @@ using UnityEngine.EventSystems;
 
 public class BattleController : MonoBehaviour
 {
+    [SerializeField] private CameraShake cameraShake;
+
     [Header("UX")]
     public TileHighlighter tileHighlighter;
 
@@ -17,6 +19,7 @@ public class BattleController : MonoBehaviour
     Dictionary<Vector2Int, Vector2Int> reachableMoveCameFromCache;
     Vector2Int? hoverMoveTile;
 
+
     [Header("Teams")]
     public List<Unit> allies = new List<Unit>();
     public List<Unit> enemies = new List<Unit>();
@@ -25,12 +28,22 @@ public class BattleController : MonoBehaviour
     public SkillData[] playerSkills;   // 플레이어(아군) 공용 슬롯 0~2
     public SkillData[] enemySkills;    // 적 공용(지금 단계)
 
+    [Header("Skill Tooltip")]
+    public SkillTooltip skillTooltip;
+
     [Header("Enemy AI")]
     public AIProfile enemyAIProfile;
 
     [Header("UI")]
     public Button[] skillButtons;      // size 3
     public TMP_Text turnText;
+
+    [Header("Battle Tempo")]
+    [SerializeField] private float turnTransitionDelay = 0.35f;
+    [SerializeField] private float enemyThinkDelay = 0.45f;
+    [SerializeField] private float afterMoveDelay = 0.15f;
+    [SerializeField] private float afterSkillDelay = 0.25f;
+    [SerializeField] private float skippedTurnDelay = 0.35f;
 
     [Header("AP UX")]
     public Color skillButtonNormalTextColor = Color.white;
@@ -269,6 +282,12 @@ public class BattleController : MonoBehaviour
                     label.text = $"{s.skillName} ({s.costAP})";
                 else
                     label.text = "-";
+
+                var hover = skillButtons[i].GetComponent<SkillButtonHover>();
+                if (hover != null)
+                {
+                    hover.Setup(s, skillTooltip);
+                }
             }
         }
 
@@ -413,7 +432,7 @@ public class BattleController : MonoBehaviour
             if (turnText)
                 turnText.text = $"{activeUnit.name} TURN (SKIPPED)";
 
-            OnActionComplete();
+            StartCoroutine(SkippedTurnRoutine());
             return;
         }
 
@@ -450,6 +469,15 @@ public class BattleController : MonoBehaviour
         }
     }
 
+    private IEnumerator SkippedTurnRoutine()
+    {
+        busy = true;
+        yield return new WaitForSeconds(skippedTurnDelay);
+        busy = false;
+
+        OnActionComplete();
+    }
+
     void OnActionComplete()
     {   
         ClearPreviewGhostPresentation();
@@ -472,8 +500,17 @@ public class BattleController : MonoBehaviour
             ApplyTileHazardOnTurnEnd(activeUnit);
         }
         turnIndex++;
-        StartNextTurn();
+        StartCoroutine(StartNextTurnDelayedRoutine());
         RefreshSkillButtonStates();
+    }
+
+    private IEnumerator StartNextTurnDelayedRoutine()
+    {
+        busy = true;
+        yield return new WaitForSeconds(turnTransitionDelay);
+        busy = false;
+
+        StartNextTurn();
     }
 
     private void ApplyTileHazardOnTurnStart(Unit unit)
@@ -609,6 +646,9 @@ public class BattleController : MonoBehaviour
                 yield break;
 
             effectsApplied = true;
+
+            yield return PlaySkillFxIfNeeded(attacker, skill, resolved);
+
             yield return CombatResolver.ApplyResolvedEffectsAndCounters(
                 skill,
                 attacker,
@@ -678,6 +718,8 @@ public class BattleController : MonoBehaviour
         attacker.AttackHitEvent -= OnHit;
         attacker.AttackEndEvent -= OnEnd;
 
+        yield return new WaitForSeconds(afterSkillDelay);
+
         onComplete?.Invoke();
     }
 
@@ -724,6 +766,7 @@ public class BattleController : MonoBehaviour
             yield break;
         }
         if (!grid) grid = GridManager.I;
+        yield return new WaitForSeconds(enemyThinkDelay);
 
         var profile = (enemy.aiProfile != null) ? enemy.aiProfile : enemyAIProfile;
 
@@ -773,12 +816,13 @@ public class BattleController : MonoBehaviour
             if (path != null)
             {
                     yield return StartCoroutine(
-                    grid.MovePathRoutine(
-                        enemy,
-                        path,
-                        (unit, step) => ApplyTileHazardOnStepEntered(unit, step)
-                    )
-                );
+                        grid.MovePathRoutine(
+                            enemy,
+                            path,
+                            (unit, step) => ApplyTileHazardOnStepEntered(unit, step)
+                        )
+                    );
+                    yield return new WaitForSeconds(afterMoveDelay);
             }
         }
 
@@ -807,11 +851,34 @@ public class BattleController : MonoBehaviour
         return IsAlly(u) ? playerSkills : enemySkills;
     }
 
+    private bool HasAnyUsableSkill(Unit unit)
+    {
+        if (unit == null || unit.IsDead) return false;
+        if (!unit.CanAct()) return false;
+
+        var pool = GetSkillPoolFor(unit);
+        if (pool == null || pool.Length == 0) return false;
+
+        for (int i = 0; i < pool.Length; i++)
+        {
+            var skill = pool[i];
+            if (skill == null) continue;
+
+            if (unit.CanPayAP(skill.costAP))
+                return true;
+        }
+
+        return false;
+    }
+
     private List<Vector2Int> BuildManhattanRangeTiles(Vector2Int origin, int minR, int maxR)
     {
         var list = new List<Vector2Int>();
         if (!grid) grid = GridManager.I;
         if (!grid) return list;
+
+        SkillData skill = PlannedSkill != null ? PlannedSkill : selectedSkill;
+        if (skill == null) return list;
 
         if (minR < 0) minR = 0;
         if (maxR < minR) maxR = minR;
@@ -823,17 +890,43 @@ public class BattleController : MonoBehaviour
                 int dy = d - Mathf.Abs(dx);
 
                 var p1 = new Vector2Int(origin.x + dx, origin.y + dy);
-                if (grid.InBounds(p1)) list.Add(p1);
+                if (IsValidSkillRangeTile(skill, origin, p1))
+                    list.Add(p1);
 
                 if (dy != 0)
                 {
                     var p2 = new Vector2Int(origin.x + dx, origin.y - dy);
-                    if (grid.InBounds(p2)) list.Add(p2);
+                    if (IsValidSkillRangeTile(skill, origin, p2))
+                        list.Add(p2);
                 }
             }
         }
 
         return list;
+    }
+
+    private bool IsValidSkillRangeTile(SkillData skill, Vector2Int from, Vector2Int tile)
+    {
+        if (grid == null || skill == null)
+            return false;
+
+        if (!grid.InBounds(tile))
+            return false;
+
+        // 타일이 없으면 표시하지 않음
+        var tileView = grid.GetTile(tile);
+        if (tileView == null)
+            return false;
+
+        // 벽/바위/나무 등 이동불가 obstacle 위에는 표시하지 않음
+        if (!tileView.Passable)
+            return false;
+
+        // LOS 필요 스킬이면 LOS 차단 시 표시하지 않음
+        if (skill.requiresLineOfSight && !grid.HasLineOfSight(from, tile))
+            return false;
+
+        return true;
     }
 
     List<Vector2Int> GetPreviewTargetTiles(SkillData skill, Unit attacker)
@@ -1623,9 +1716,33 @@ public class BattleController : MonoBehaviour
             yield break;
         }
 
-        // 2) Skill을 사용했으면 턴 종료
+        // 2) Skill을 사용했으면:
+        //    - AP가 남고 사용 가능한 스킬이 있으면 턴 유지
+        //    - 아니면 턴 종료
         if (executedSkill)
         {
+            actionQueue.Clear();
+            ClearPlannedTarget();
+
+            selectedSkill = null;
+            selectedSkillIndex = -1;
+
+            inputMode = PlayerInputMode.SkillPreview;
+
+            RefreshSkillButtonStates();
+
+            if (activeUnit != null &&
+                !activeUnit.IsDead &&
+                activeUnit.CanAct() &&
+                HasAnyUsableSkill(activeUnit))
+            {
+                busy = false;
+                waitingInput = true;
+                SetSkillButtonsInteractable(true);
+                RefreshPlanningVisuals();
+                yield break;
+            }
+
             busy = false;
             waitingInput = false;
             OnActionComplete();
@@ -2153,8 +2270,21 @@ public class BattleController : MonoBehaviour
             for (int y = 0; y < grid.height; y++)
             {
                 var p = new Vector2Int(x, y);
-                if (CombatTargetResolver.IsPointCastable(skill, fromPos, p, grid))
-                    result.Add(p);
+
+                // 1. 맵에 실제 로직 타일이 없는 곳은 표시하지 않음
+                var tile = grid.GetTile(p);
+                if (tile == null)
+                    continue;
+
+                // 2. obstacle / wall / tree 등 passable=false 타일은 표시하지 않음
+                if (!tile.Passable)
+                    continue;
+
+                // 3. 기존 스킬 사거리 + LOS 규칙 유지
+                if (!CombatTargetResolver.IsPointCastable(skill, fromPos, p, grid))
+                    continue;
+
+                result.Add(p);
             }
         }
 
@@ -2229,7 +2359,7 @@ public class BattleController : MonoBehaviour
         if (previewActorRoot == null || previewActorSourceVisualRoot == null) return;
 
         Vector3 sourceWorld = sourceUnit.transform.position;
-        Vector3 targetWorld = grid.GridToWorld(previewGridPos) + previewActorOffset;
+        Vector3 targetWorld = grid.GridToWorldWithHeight(previewGridPos) + previewActorOffset;
         Vector3 delta = targetWorld - sourceWorld;
 
         // visual root 전체를 source visual root 위치 기준으로 이동
@@ -2723,5 +2853,48 @@ public class BattleController : MonoBehaviour
         bool canClickAlly = GetCasterAllies(activeUnit).Contains(target) && SkillMetaUtility.IsMostlyHelpfulSkill(skill);
 
         return canClickEnemy || canClickAlly;
+    }
+
+    IEnumerator PlaySkillFxIfNeeded(
+    Unit attacker,
+    SkillData skill,
+    CombatResolver.ResolveResult resolved)
+    {
+        if (attacker == null || skill == null || resolved.targets == null)
+            yield break;
+
+        if (skill.projectileFxPrefab == null)
+            yield break;
+
+        Unit target = null;
+
+        for (int i = 0; i < resolved.targets.Count; i++)
+        {
+            var t = resolved.targets[i];
+
+            if (t != null && !t.IsDead)
+            {
+                target = t;
+                break;
+            }
+        }
+
+        if (target == null)
+            yield break;
+
+        GameObject obj = Instantiate(skill.projectileFxPrefab);
+        ProjectileFx projectile = obj.GetComponent<ProjectileFx>();
+
+        if (projectile == null)
+        {
+            Destroy(obj);
+            yield break;
+        }
+
+        Vector3 from = attacker.transform.position + skill.projectileStartOffset;
+        Vector3 to = target.transform.position + skill.projectileHitOffset;
+
+        yield return projectile.Play(from, to, skill.impactFxPrefab);
+        cameraShake?.Shake(0.05f, 0.06f);
     }
 }   
