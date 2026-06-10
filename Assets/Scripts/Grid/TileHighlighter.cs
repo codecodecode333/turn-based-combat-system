@@ -551,7 +551,7 @@ public class TileHighlighter : MonoBehaviour
 
     Vector3 GetWorld(Vector2Int tile)
     {
-        return grid != null ? grid.GridToWorld(tile) : Vector3.zero;
+        return grid != null ? grid.GridToWorldWithHeight(tile) : Vector3.zero;
     }
 
     float DirectionToZAngle(Vector2 dir)

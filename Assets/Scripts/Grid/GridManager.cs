@@ -11,6 +11,9 @@ public class GridManager : MonoBehaviour
     public int height = 6;
     public Vector3 origin = Vector3.zero;
 
+    [Header("Height Visual")]
+    public float heightWorldOffsetY = 0.2f;
+
     [Header("World Mapping")]
     public bool isIsometric = true;
     public float cellSize = 1f;
@@ -118,7 +121,7 @@ public class GridManager : MonoBehaviour
         if (!TryMoveLogical(u, to)) yield break;
 
         Vector3 start = u.transform.position;
-        Vector3 end = GridToWorld(to);
+        Vector3 end = GridToWorldWithHeight(to);
 
         // ✅ duration 자동 계산(타일/초 기반)
         if (duration < 0f)
@@ -205,7 +208,7 @@ public class GridManager : MonoBehaviour
     // -----------------------------
     void WarpToGrid(Unit u, Vector2Int p)
     {
-        u.transform.position = GridToWorld(p);
+        u.transform.position = GridToWorldWithHeight(p);
     }
 
     void SetUnitGridPos(Unit u, Vector2Int p)
@@ -276,6 +279,13 @@ public class GridManager : MonoBehaviour
     {
         public Dictionary<Vector2Int, int> cost;
         public Dictionary<Vector2Int, Vector2Int> cameFrom;
+    }
+
+    public Vector3 GridToWorldWithHeight(Vector2Int p, int heightLevel)
+    {
+        Vector3 world = GridToWorld(p);
+        world.y += heightLevel * heightWorldOffsetY;
+        return world;
     }
 
     public ReachableData GetReachableData(Unit mover, int moveRange)
@@ -469,9 +479,15 @@ public class GridManager : MonoBehaviour
     public bool IsPassableTile(Vector2Int pos)
     {
         var tile = GetTileView(pos);
-        if (tile == null) return true; // 타일이 없으면 일단 통과 허용(초기 단계 안전)
+        if (tile == null) return false; 
         if (tile.tileData == null) return true;
         return tile.tileData.passable;
+    }
+
+    public void RegisterTile(TileView tile)
+    {
+        if (tile == null) return;
+        tiles[tile.GridPos] = tile;
     }
 
     public int GetTileHeight(Vector2Int pos)
@@ -479,6 +495,17 @@ public class GridManager : MonoBehaviour
         var tile = GetTileView(pos);
         if (tile == null || tile.tileData == null) return 0;
         return tile.tileData.heightLevel;
+    }
+
+    public Vector3 GridToWorldWithHeight(Vector2Int p)
+    {
+        Vector3 world = GridToWorld(p);
+
+        var tile = GetTile(p);
+        if (tile != null)
+            world.y += tile.HeightLevel * heightWorldOffsetY;
+
+        return world;
     }
 
     public int GetHeightDelta(Vector2Int from, Vector2Int to)
