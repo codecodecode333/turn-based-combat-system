@@ -12,4 +12,4 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 4c8c91de5ec56134599e9c670fe60891, type: 3}
   m_Name: New Stun Apply Effect
   m_EditorClassIdentifier: Assembly-CSharp::StunApplyEffect
-  durationTurns: 3
+  durationTurns: 1

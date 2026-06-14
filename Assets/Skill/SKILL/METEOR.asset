@@ -10,24 +10,24 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: fea434eed2669bb45a0502daf44b9525, type: 3}
-  m_Name: Burn_SingleEnemy
+  m_Name: METEOR
   m_EditorClassIdentifier: Assembly-CSharp::SkillData
-  skillName: Burn_singleEnemy
+  skillName: Meteor
   animationTrigger: triggerAttack
   timing: 1
-  projectileFxPrefab: {fileID: 6759893679785636148, guid: a4b658bcba9d00446907f1a1afeb3ff0, type: 3}
-  impactFxPrefab: {fileID: 1590658815044798337, guid: 2b99472c6a6ecca4ba40ebc2229dd814, type: 3}
+  projectileFxPrefab: {fileID: 0}
+  impactFxPrefab: {fileID: 0}
   projectileStartOffset: {x: 0, y: 0.25, z: 0}
   projectileHitOffset: {x: 0, y: 0.15, z: 0}
   effects:
-  - {fileID: 11400000, guid: 38e5bb3a9365a9c4da770ea93d9d5c10, type: 2}
-  targetMode: 1
+  - {fileID: 11400000, guid: 0a67a08961e21d74ab692e9acd6089d9, type: 2}
+  targetMode: 2
   allowFriendlyFire: 1
-  aoeRadius: 0
+  aoeRadius: 2
   minRange: 1
-  maxRange: 3
-  requiresLineOfSight: 1
-  costAP: 1
-  icon: {fileID: 0}
-  description: "\uD654\uC5FC\uAD6C\uB97C \uBC1C\uC0AC\uD558\uC5EC \uD53C\uD574\uB97C
-    \uC8FC\uACE0\nBurn\uC744 \uBD80\uC5EC\uD55C\uB2E4."
+  maxRange: 5
+  requiresLineOfSight: 0
+  costAP: 2
+  icon: {fileID: 21300000, guid: 34565ada466fd1a4680cc1f1ff43b5aa, type: 3}
+  description: "\uD654\uC5FC\uAD6C\uB97C \uB5A8\uC5B4\uD2B8\uB824 \uBC94\uC704 \uB0B4\uC5D0
+    5\uC758 \uD53C\uD574\uB97C \uC900\uB2E4."

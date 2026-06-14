@@ -10,18 +10,23 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: fea434eed2669bb45a0502daf44b9525, type: 3}
-  m_Name: stun
+  m_Name: STUN
   m_EditorClassIdentifier: Assembly-CSharp::SkillData
-  skillName: all
+  skillName: Stun
   animationTrigger: triggerAttack
   timing: 1
+  projectileFxPrefab: {fileID: 0}
+  impactFxPrefab: {fileID: 0}
+  projectileStartOffset: {x: 0, y: 0.25, z: 0}
+  projectileHitOffset: {x: 0, y: 0.15, z: 0}
   effects:
   - {fileID: 11400000, guid: 78878f54a82b04f43ba6d519d42abdd1, type: 2}
-  - {fileID: 11400000, guid: 38e5bb3a9365a9c4da770ea93d9d5c10, type: 2}
-  - {fileID: 11400000, guid: 1f36a5c4cc0e4534ca9c6ef85e717b0b, type: 2}
   targetMode: 1
+  allowFriendlyFire: 1
   aoeRadius: 0
   minRange: 0
   maxRange: 5
   requiresLineOfSight: 0
-  costAP: 1
+  costAP: 3
+  icon: {fileID: 21300000, guid: cc071bef13045c1409b3d95dcaaecc70, type: 3}
+  description: "1\uD134\uB3D9\uC548 \uAE30\uC808\uC744 \uBD80\uC5EC\uD55C\uB2E4."

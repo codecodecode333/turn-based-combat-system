@@ -10,9 +10,9 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: fea434eed2669bb45a0502daf44b9525, type: 3}
-  m_Name: Burn_SingleEnemy
+  m_Name: FireBall
   m_EditorClassIdentifier: Assembly-CSharp::SkillData
-  skillName: Burn_singleEnemy
+  skillName: FireBall
   animationTrigger: triggerAttack
   timing: 1
   projectileFxPrefab: {fileID: 6759893679785636148, guid: a4b658bcba9d00446907f1a1afeb3ff0, type: 3}
@@ -21,6 +21,7 @@ MonoBehaviour:
   projectileHitOffset: {x: 0, y: 0.15, z: 0}
   effects:
   - {fileID: 11400000, guid: 38e5bb3a9365a9c4da770ea93d9d5c10, type: 2}
+  - {fileID: 11400000, guid: 0a67a08961e21d74ab692e9acd6089d9, type: 2}
   targetMode: 1
   allowFriendlyFire: 1
   aoeRadius: 0
@@ -28,6 +29,6 @@ MonoBehaviour:
   maxRange: 3
   requiresLineOfSight: 1
   costAP: 1
-  icon: {fileID: 0}
-  description: "\uD654\uC5FC\uAD6C\uB97C \uBC1C\uC0AC\uD558\uC5EC \uD53C\uD574\uB97C
-    \uC8FC\uACE0\nBurn\uC744 \uBD80\uC5EC\uD55C\uB2E4."
+  icon: {fileID: 21300000, guid: f02ee47426e79874c95c51363e8456c9, type: 3}
+  description: "\uD654\uC5FC\uAD6C\uB97C \uBC1C\uC0AC\uD558\uC5EC 5\uC758 \uD53C\uD574\uB97C
+    \uC8FC\uACE0\n3\uD134\uB3D9\uC548 \uD654\uC0C1\uC744 \uBD80\uC5EC\uD55C\uB2E4."

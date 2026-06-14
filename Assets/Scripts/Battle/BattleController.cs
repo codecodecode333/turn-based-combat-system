@@ -31,6 +31,10 @@ public class BattleController : MonoBehaviour
     [Header("Skill Tooltip")]
     public SkillTooltip skillTooltip;
 
+    [Header("Skill Cost UI")]
+    public Color costOnColor = Color.white;
+    public Color costOffColor = new Color(0.25f, 0.25f, 0.25f, 0.55f);
+
     [Header("Enemy AI")]
     public AIProfile enemyAIProfile;
 
@@ -277,17 +281,41 @@ public class BattleController : MonoBehaviour
             if (label != null)
             {
                 var s = (pool != null && idx < pool.Length) ? pool[idx] : null;
+                var iconImage =
+                    skillButtons[i]
+                    .transform
+                    .Find("Frame/Icon")
+                    ?.GetComponent<Image>();
 
                 if (s != null)
-                    label.text = $"{s.skillName} ({s.costAP})";
+                {
+
+                    if (iconImage != null)
+                    {
+                        if (s != null && s.icon != null)
+                        {
+                            iconImage.enabled = true;
+                            iconImage.sprite = s.icon;
+                        }
+                        else
+                        {
+                            iconImage.enabled = false;
+                        }
+                    }
+                }
                 else
-                    label.text = "-";
+                {
+                    if (iconImage != null)
+                        iconImage.sprite = null;
+                }
 
                 var hover = skillButtons[i].GetComponent<SkillButtonHover>();
                 if (hover != null)
                 {
                     hover.Setup(s, skillTooltip);
                 }
+
+                RefreshSkillCostIcons(skillButtons[i], s);
             }
         }
 
@@ -2896,5 +2924,27 @@ public class BattleController : MonoBehaviour
 
         yield return projectile.Play(from, to, skill.impactFxPrefab);
         cameraShake?.Shake(0.05f, 0.06f);
+    }
+
+    void RefreshSkillCostIcons(Button button, SkillData skill)
+    {
+        if (button == null) return;
+
+        var root = button.transform.Find("ApCostRoot");
+        if (root == null) return;
+
+        int cost = skill != null ? Mathf.Clamp(skill.costAP, 0, 3) : 0;
+
+        for (int i = 0; i < 3; i++)
+        {
+            var t = root.Find($"Cost_{i}");
+            if (t == null) continue;
+
+            var img = t.GetComponent<Image>();
+            if (img == null) continue;
+
+            img.enabled = skill != null;
+            img.color = i < cost ? costOnColor : costOffColor;
+        }
     }
 }   
