@@ -41,6 +41,7 @@ public class BattleController : MonoBehaviour
     [Header("UI")]
     public Button[] skillButtons;      // size 3
     public TMP_Text turnText;
+    [SerializeField] private UnitInfoPanel unitInfoPanel;
 
     [Header("Battle Tempo")]
     [SerializeField] private float turnTransitionDelay = 0.35f;
@@ -508,6 +509,7 @@ public class BattleController : MonoBehaviour
 
     void OnActionComplete()
     {   
+        HideUnitInfo();
         ClearPreviewGhostPresentation();
         ClearHoverAOEPreview();
         ClearAllPlannedActions();
@@ -1089,7 +1091,27 @@ public class BattleController : MonoBehaviour
     }
 
     public void OnTileClicked(Vector2Int gridPos)
-    {
+    {   
+
+        Unit unitOnTile = null;
+
+        if (grid != null)
+            unitOnTile = grid.GetUnitAt(gridPos);
+
+        if (unitOnTile != null)
+        {
+            ShowUnitInfo(unitOnTile);
+
+            // Move 상태에서 유닛이 있는 칸을 클릭한 경우:
+            // 정보만 보고 이동 계획은 하지 않음
+            if (inputMode == PlayerInputMode.Move)
+                return;
+        }
+        else
+        {
+            HideUnitInfo();
+        }
+
         if (battleEnded) return;
         if (!waitingInput || busy) return;
         if (activeUnit == null || activeUnit.IsDead) return;
@@ -1822,6 +1844,8 @@ public class BattleController : MonoBehaviour
             RefreshPlanningVisuals();
             return;
         }
+
+        HideUnitInfo();
     }
 
     private bool RequiresExplicitTarget(SkillData skill)
@@ -2946,5 +2970,21 @@ public class BattleController : MonoBehaviour
             img.enabled = skill != null;
             img.color = i < cost ? costOnColor : costOffColor;
         }
+    }
+
+    public void ShowUnitInfo(Unit unit)
+    {
+        if (unitInfoPanel == null)
+        {
+            return;
+        }
+
+        unitInfoPanel.Show(unit);
+    }
+
+    public void HideUnitInfo()
+    {
+        if (unitInfoPanel != null)
+            unitInfoPanel.Hide();
     }
 }   

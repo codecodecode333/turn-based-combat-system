@@ -226,7 +226,14 @@ public class BattleInput : MonoBehaviour
 
         // 핵심: RaycastAll로 “유닛/타일 둘 다” 찾는다
         var hits = Physics2D.RaycastAll(world, Vector2.zero, 0f, raycastMask);
-        if (hits == null || hits.Length == 0) return;
+
+        if (hits == null || hits.Length == 0)
+        {
+            if (EventSystem.current == null || !EventSystem.current.IsPointerOverGameObject())
+                battle.HideUnitInfo();
+
+            return;
+        }
 
         Unit hitUnit = null;
         TileView hitTile = null;
@@ -273,7 +280,9 @@ public class BattleInput : MonoBehaviour
             if (hitTile != null)
                 battle.OnTileClicked(hitTile.GridPos);
             else if (hitUnit != null)
-                battle.OnUnitClicked(hitUnit); // 폴백
+                battle.OnUnitClicked(hitUnit);
+            else if (EventSystem.current == null || !EventSystem.current.IsPointerOverGameObject())
+                battle.HideUnitInfo();
         }
         else
         {
@@ -281,6 +290,8 @@ public class BattleInput : MonoBehaviour
                 battle.OnUnitClicked(hitUnit);
             else if (hitTile != null)
                 battle.OnTileClicked(hitTile.GridPos);
+            else if (EventSystem.current == null || !EventSystem.current.IsPointerOverGameObject())
+                battle.HideUnitInfo();
         }
     }
 }
