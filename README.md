@@ -4,6 +4,9 @@ Unity 기반 턴제 전술 전투 시스템 개인 프로젝트입니다.
 
 Grid 기반 전투, AP(Action Point) 시스템, 상태이상, Utility AI 등을 중심으로 전투 구조와 게임플레이 흐름 설계에 집중했습니다.
 
+<img width="871" height="488" alt="image" src="https://github.com/user-attachments/assets/56d2db36-271e-4682-b988-4b0fcd4fd5d9" />
+
+
 ---
 
 # Tech Stack
