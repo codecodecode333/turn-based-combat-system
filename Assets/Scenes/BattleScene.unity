@@ -279,13 +279,14 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 188907692}
+  - component: {fileID: 188907693}
   m_Layer: 0
   m_Name: UnitInfoPanel
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!224 &188907692
 RectTransform:
   m_ObjectHideFlags: 0
@@ -313,6 +314,23 @@ RectTransform:
   m_AnchoredPosition: {x: 100, y: 0}
   m_SizeDelta: {x: 280, y: 520}
   m_Pivot: {x: 0.5, y: 0.5}
+--- !u!114 &188907693
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 188907691}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f6451866703ef3643b0be1e9cb74ff09, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::UnitInfoPanel
+  nameText: {fileID: 1439055594}
+  hpText: {fileID: 1317574115}
+  apText: {fileID: 385223370}
+  statText: {fileID: 1561870604}
+  statusText: {fileID: 519621598}
 --- !u!1 &273381413
 GameObject:
   m_ObjectHideFlags: 0
@@ -6034,6 +6052,7 @@ MonoBehaviour:
   - {fileID: 448399904}
   - {fileID: 461920128}
   turnText: {fileID: 2123870233}
+  unitInfoPanel: {fileID: 188907693}
   turnTransitionDelay: 0.35
   enemyThinkDelay: 0.45
   afterMoveDelay: 0.15
@@ -6132,7 +6151,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: New Text
+  m_text: name
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}
   m_sharedMaterial: {fileID: 2180264, guid: 8f586378b4e144a9851e7b34d9b748ee, type: 2}

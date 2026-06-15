@@ -27,7 +27,10 @@ public class UnitHud : MonoBehaviour
     public Image hpBarFill;
     public Image[] apDots;
 
-    public Color apOnColor = new Color(1f, 0.85f, 0.2f, 1f);
+    public Color allyHpColor = new Color32(80, 220, 120, 255);
+    public Color enemyHpColor = new Color32(220, 80, 80, 255);
+
+    public Color apOnColor = new Color32(148, 183, 244, 255);
     public Color apOffColor = new Color(0.2f, 0.2f, 0.2f, 0.6f);
 
     Coroutine apFlashCo;
@@ -109,9 +112,13 @@ public class UnitHud : MonoBehaviour
             hpText.text = $"HP {unit.currentHP}/{unit.maxHP}";
 
         if (hpBarFill)
+        {
             hpBarFill.fillAmount = unit.maxHP > 0
                 ? unit.currentHP / (float)unit.maxHP
                 : 0f;
+
+            hpBarFill.color = unit.isAlly ? allyHpColor : enemyHpColor;
+        }
     }
 
     void RefreshAp()
