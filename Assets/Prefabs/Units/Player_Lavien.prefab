@@ -127,6 +127,7 @@ MonoBehaviour:
   currentAP: 0
   skillPoolOverride: []
   aiProfile: {fileID: 0}
+  portrait: {fileID: 21300000, guid: c4656a2de00c7344fa714ed22f83c297, type: 3}
   anim: {fileID: 0}
   attackTrigger: triggerAttack
   hitTrigger: triggerHit

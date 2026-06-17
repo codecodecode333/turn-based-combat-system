@@ -30,5 +30,6 @@ MonoBehaviour:
   requiresLineOfSight: 1
   costAP: 1
   icon: {fileID: 21300000, guid: f02ee47426e79874c95c51363e8456c9, type: 3}
-  description: "\uD654\uC5FC\uAD6C\uB97C \uBC1C\uC0AC\uD558\uC5EC 5\uC758 \uD53C\uD574\uB97C
-    \uC8FC\uACE0\n3\uD134\uB3D9\uC548 \uD654\uC0C1\uC744 \uBD80\uC5EC\uD55C\uB2E4."
+  description: 'Deal 5 damage.
+
+    Apply Burn (3 turns).'

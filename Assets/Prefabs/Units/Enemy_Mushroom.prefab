@@ -64,6 +64,7 @@ MonoBehaviour:
   skillPoolOverride:
   - {fileID: 11400000, guid: 737c7ec0d287b4e4a8b2aea2db7e0c4c, type: 2}
   aiProfile: {fileID: 11400000, guid: 7f01a0630b9ce9c4b92425ea153ae8de, type: 2}
+  portrait: {fileID: 21300000, guid: eb85626bab9f6be46ae2a1440057ba07, type: 3}
   anim: {fileID: 0}
   attackTrigger: triggerAttack
   hitTrigger: triggerHit

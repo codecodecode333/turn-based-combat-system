@@ -33,6 +33,9 @@ public class Unit : MonoBehaviour
 
     public bool IsDead => currentHP <= 0;
 
+    [Header("UI")]
+    public Sprite portrait;
+
     [Header("Animator")]
     public Animator anim;
     public string attackTrigger = "triggerAttack";
