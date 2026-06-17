@@ -7785,6 +7785,18 @@ PrefabInstance:
       propertyPath: m_WasSpriteAssigned
       value: 1
       objectReference: {fileID: 0}
+    - target: {fileID: 6208406175251661543, guid: 0402c8c641b24064b8202c3b1c47fa13, type: 3}
+      propertyPath: apOnColor.b
+      value: 0.95686275
+      objectReference: {fileID: 0}
+    - target: {fileID: 6208406175251661543, guid: 0402c8c641b24064b8202c3b1c47fa13, type: 3}
+      propertyPath: apOnColor.g
+      value: 0.7176471
+      objectReference: {fileID: 0}
+    - target: {fileID: 6208406175251661543, guid: 0402c8c641b24064b8202c3b1c47fa13, type: 3}
+      propertyPath: apOnColor.r
+      value: 0.5803922
+      objectReference: {fileID: 0}
     - target: {fileID: 6541947794648351540, guid: 0402c8c641b24064b8202c3b1c47fa13, type: 3}
       propertyPath: m_VerticalAlignment
       value: 256
@@ -7832,6 +7844,10 @@ PrefabInstance:
     - target: {fileID: 8325293502993455063, guid: 0402c8c641b24064b8202c3b1c47fa13, type: 3}
       propertyPath: m_SortingLayerID
       value: 1623318147
+      objectReference: {fileID: 0}
+    - target: {fileID: 8561883270490843826, guid: 0402c8c641b24064b8202c3b1c47fa13, type: 3}
+      propertyPath: m_ConstrainProportionsScale
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 9108083848137162580, guid: 0402c8c641b24064b8202c3b1c47fa13, type: 3}
       propertyPath: m_IsActive
