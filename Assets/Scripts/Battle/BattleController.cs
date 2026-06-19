@@ -32,7 +32,7 @@ public class BattleController : MonoBehaviour
     public SkillTooltip skillTooltip;
 
     [Header("Skill Cost UI")]
-    public Color costOnColor = Color.white;
+    public Color costOnColor = new Color32(255, 215, 60, 255);
     public Color costOffColor = new Color(0.25f, 0.25f, 0.25f, 0.55f);
 
     [Header("Enemy AI")]

@@ -18,7 +18,7 @@ public class UnitHud : MonoBehaviour
     public GameObject targetIndicator; // 아이콘(예: !, 검표시 등)
 
     [Header("AP Feedback")]
-    public Color normalApColor = Color.white;
+    public Color normalApColor = new Color32(255, 215, 60, 255);
     public Color lowApColor = new Color(1f, 0.4f, 0.4f, 1f);
     public float apFlashDuration = 0.18f;
     public float apPunchScale = 1.15f;
@@ -27,8 +27,8 @@ public class UnitHud : MonoBehaviour
     public Image hpBarFill;
     public Image[] apDots;
 
-    public Color allyHpColor = new Color32(80, 220, 120, 255);
-    public Color enemyHpColor = new Color32(220, 80, 80, 255);
+    public Color allyHpColor = new Color32(70, 140, 90, 255);
+    public Color enemyHpColor = new Color32(140, 70, 70, 255);
 
     public Color apOnColor = new Color32(148, 183, 244, 255);
     public Color apOffColor = new Color(0.2f, 0.2f, 0.2f, 0.6f);
@@ -108,14 +108,24 @@ public class UnitHud : MonoBehaviour
 
     void RefreshHp()
     {
+        if (unit == null)
+            return;
+
         if (hpText)
             hpText.text = $"HP {unit.currentHP}/{unit.maxHP}";
 
         if (hpBarFill)
         {
-            hpBarFill.fillAmount = unit.maxHP > 0
+            float hp01 = unit.maxHP > 0
                 ? unit.currentHP / (float)unit.maxHP
                 : 0f;
+
+            hp01 = Mathf.Clamp01(hp01);
+
+            hpBarFill.type = Image.Type.Filled;
+            hpBarFill.fillMethod = Image.FillMethod.Horizontal;
+            hpBarFill.fillOrigin = 0; // Left
+            hpBarFill.fillAmount = hp01;
 
             hpBarFill.color = unit.isAlly ? allyHpColor : enemyHpColor;
         }
