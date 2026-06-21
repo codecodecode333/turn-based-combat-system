@@ -10,6 +10,7 @@ GameObject:
   m_Component:
   - component: {fileID: 8870877583666126227}
   - component: {fileID: 8929343536912224863}
+  - component: {fileID: 9184875420414539971}
   m_Layer: 0
   m_Name: highlight_range
   m_TagString: Untagged
@@ -91,3 +92,18 @@ SpriteRenderer:
   m_SpriteTileMode: 0
   m_WasSpriteAssigned: 1
   m_SpriteSortPoint: 0
+--- !u!114 &9184875420414539971
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7971415546341332404}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 18f20f73dedf71048849b278b832ec9b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TilePulseFx
+  speed: 4
+  minAlpha: 0.35
+  maxAlpha: 0.75

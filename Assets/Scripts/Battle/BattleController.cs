@@ -43,6 +43,9 @@ public class BattleController : MonoBehaviour
     public TMP_Text turnText;
     [SerializeField] private UnitInfoPanel unitInfoPanel;
 
+    [Header("Turn Popup")]
+    public TurnPopup turnPopup;
+
     [Header("Battle Tempo")]
     [SerializeField] private float turnTransitionDelay = 0.35f;
     [SerializeField] private float enemyThinkDelay = 0.45f;
@@ -452,7 +455,12 @@ public class BattleController : MonoBehaviour
 
         if (turnText)
             turnText.text = $"{activeUnit.name} TURN (SPD {activeUnit.speed})";
-
+        
+        if (turnPopup != null)
+        {
+            string popup = IsAlly(activeUnit) ? "PLAYER TURN" : "ENEMY TURN";
+            turnPopup.Show(popup);
+        }
         // 핵심: tick 후 제거됐더라도, 턴 시작 시 행동불가였으면 이번 턴은 스킵
         if (!canActAtTurnStart)
         {
