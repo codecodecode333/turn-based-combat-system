@@ -47,6 +47,9 @@ TagManager:
   - name: Highlight
     uniqueID: 696240517
     locked: 0
+  - name: obstacle
+    uniqueID: 148125485
+    locked: 0
   - name: Units
     uniqueID: 1623318147
     locked: 0

@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Tilemaps;
 
 public class TileHighlighter : MonoBehaviour
 {
@@ -66,6 +67,16 @@ public class TileHighlighter : MonoBehaviour
     public GameObject moveTilePrefab;          // 파랑
     public GameObject skillRangeTilePrefab;    // 주황 - 기본 스킬 사거리
     public GameObject previewAreaTilePrefab;   // 주황 - hover AOE 범위
+
+    [Header("Highlight Tilemaps")]
+    public Tilemap highlightH0;
+    public Tilemap highlightH1;
+    public Tilemap highlightH2;
+
+    [Header("Highlight Tiles")]
+    public TileBase moveHighlightTile;
+    public TileBase skillRangeHighlightTile;
+    public TileBase previewAreaHighlightTile;
 
     [Header("FX Prefabs")]
     public GameObject selectedFxPrefab;
@@ -370,6 +381,8 @@ public class TileHighlighter : MonoBehaviour
         allTiles.UnionWith(warningFxTiles);
         allTiles.UnionWith(hazardFxTiles);
 
+        ClearHighlightTilemaps();
+
         foreach (var kv in cells)
         {
             if (kv.Value == null) continue;
@@ -380,11 +393,12 @@ public class TileHighlighter : MonoBehaviour
 
         foreach (var tile in allTiles)
         {
+            ApplyBaseTilemap(tile, ResolveBaseType(tile));
+
             var cell = GetOrCreateCell(tile);
             if (cell == null) continue;
 
             cell.SetRootActive(true);
-            ApplyBase(cell, ResolveBaseType(tile), tile);
             ApplyFx(cell, ResolveFx(tile));
         }
     }
@@ -414,12 +428,43 @@ public class TileHighlighter : MonoBehaviour
         cell.warningFx = CreateChild(warningFxPrefab, root.transform, localFxOffset, "FX_FriendlyFire");
         cell.hazardFx = CreateChild(hazardFxPrefab, root.transform, localFxOffset, "FX_Hazard");
 
+        ApplySorting(cell, root.transform.position);
+
         cell.HideAllBase();
         cell.HideAllFx();
         cell.SetRootActive(false);
 
         cells[tile] = cell;
         return cell;
+    }
+
+    void ApplySorting(OverlayCellView cell, Vector3 worldPos)
+    {
+        int baseOrder = -Mathf.RoundToInt(worldPos.y * 100f);
+
+        SetSorting(cell.baseMove, baseOrder);
+        SetSorting(cell.baseSkillRange, baseOrder);
+        SetSorting(cell.basePreviewArea, baseOrder);
+
+        // FX는 base보다 살짝 위
+        SetSorting(cell.selectedFx, baseOrder + 5);
+        SetSorting(cell.actionableFx, baseOrder + 6);
+        SetSorting(cell.targetFx, baseOrder + 7);
+        SetSorting(cell.warningFx, baseOrder + 7);
+        SetSorting(cell.hazardFx, baseOrder + 4);
+    }
+
+    void SetSorting(GameObject obj, int order)
+    {
+        if (obj == null) return;
+
+        var renderers = obj.GetComponentsInChildren<SpriteRenderer>(true);
+
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            if (renderers[i] == null) continue;
+            renderers[i].sortingOrder = order;
+        }
     }
 
     void ApplyBase(OverlayCellView cell, BaseOverlayType baseType, Vector2Int tile)
@@ -456,6 +501,62 @@ public class TileHighlighter : MonoBehaviour
         }
     }
 
+    void ClearHighlightTilemaps()
+    {
+        if (highlightH0 != null) highlightH0.ClearAllTiles();
+        if (highlightH1 != null) highlightH1.ClearAllTiles();
+        if (highlightH2 != null) highlightH2.ClearAllTiles();
+    }
+
+    void ApplyBaseTilemap(Vector2Int tile, BaseOverlayType baseType)
+    {
+        if (baseType == BaseOverlayType.None)
+            return;
+
+        Tilemap map = GetHighlightTilemap(tile);
+        if (map == null)
+            return;
+
+        TileBase tileAsset = GetHighlightTile(baseType);
+        if (tileAsset == null)
+            return;
+
+        map.SetTile(new Vector3Int(tile.x, tile.y, 0), tileAsset);
+    }
+
+    TileBase GetHighlightTile(BaseOverlayType baseType)
+    {
+        switch (baseType)
+        {
+            case BaseOverlayType.Move:
+                return moveHighlightTile;
+
+            case BaseOverlayType.SkillRange:
+                return skillRangeHighlightTile;
+
+            case BaseOverlayType.PreviewArea:
+                return previewAreaHighlightTile;
+
+            default:
+                return null;
+        }
+    }
+
+    Tilemap GetHighlightTilemap(Vector2Int tile)
+    {
+        if (grid == null)
+            return highlightH0;
+
+        int h = grid.GetVisualHeightFromTilemaps(tile);
+
+        switch (h)
+        {
+            case 0: return highlightH0;
+            case 1: return highlightH1;
+            case 2: return highlightH2;
+            default: return highlightH0;
+        }
+    }
     bool ShouldPulseBase(Vector2Int tile, BaseOverlayType baseType)
     {
         // 실제 피해/효과 대상이 최우선

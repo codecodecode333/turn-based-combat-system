@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Tilemaps;
 
 public class GridManager : MonoBehaviour
 {
@@ -23,6 +24,15 @@ public class GridManager : MonoBehaviour
     [Header("Movement")]
     public float tilesPerSecond = 3.5f;   // ✅ 추천: 3~4 (낮을수록 느림)
     public float minMoveDuration = 0.12f; // ✅ 너무 짧아지는 것 방지
+
+    [Header("Tilemaps")]
+    public Tilemap groundH0;
+    public Tilemap groundH1;
+    public Tilemap groundH2;
+
+    public Tilemap obstacleH0;
+    public Tilemap obstacleH1;
+    public Tilemap obstacleH2;
 
     // 좌표 -> 유닛 점유 맵
     private readonly Dictionary<Vector2Int, Unit> occ = new Dictionary<Vector2Int, Unit>();
@@ -500,11 +510,8 @@ public class GridManager : MonoBehaviour
     public Vector3 GridToWorldWithHeight(Vector2Int p)
     {
         Vector3 world = GridToWorld(p);
-
-        var tile = GetTile(p);
-        if (tile != null)
-            world.y += tile.HeightLevel * heightWorldOffsetY;
-
+        int h = GetVisualHeightFromTilemaps(p);
+        world.y += h * heightWorldOffsetY;
         return world;
     }
 
@@ -525,6 +532,42 @@ public class GridManager : MonoBehaviour
 
         int dh = Mathf.Abs(toH - fromH);
         return dh <= mover.maxClimbDelta;
+    }
+
+    Vector3Int ToCell(Vector2Int p)
+    {
+        return new Vector3Int(p.x, p.y, 0);
+    }
+
+    bool HasTile(Tilemap map, Vector2Int p)
+    {
+        return map != null && map.HasTile(ToCell(p));
+    }
+
+    public int GetVisualHeightFromTilemaps(Vector2Int p)
+    {
+        int h = -1;
+
+        if (HasTile(groundH0, p)) h = Mathf.Max(h, 0);
+        if (HasTile(groundH1, p)) h = Mathf.Max(h, 1);
+        if (HasTile(groundH2, p)) h = Mathf.Max(h, 2);
+
+        if (HasTile(obstacleH0, p)) h = Mathf.Max(h, 0);
+        if (HasTile(obstacleH1, p)) h = Mathf.Max(h, 1);
+        if (HasTile(obstacleH2, p)) h = Mathf.Max(h, 2);
+
+        return Mathf.Max(0, h);
+    }
+
+    public bool HasAnyVisualTile(Vector2Int p)
+    {
+        return
+            HasTile(groundH0, p) ||
+            HasTile(groundH1, p) ||
+            HasTile(groundH2, p) ||
+            HasTile(obstacleH0, p) ||
+            HasTile(obstacleH1, p) ||
+            HasTile(obstacleH2, p);
     }
 
 #if UNITY_EDITOR
