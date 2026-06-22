@@ -1,4 +1,4 @@
-<img width="933" height="523" alt="image" src="https://github.com/user-attachments/assets/2429d6c7-5a9f-48e3-876a-14ba5a767059" /># Turn-Based Combat System Portfolio
+# Turn-Based Combat System Portfolio
 
 Unity 기반 턴제 전술 전투 시스템 개인 프로젝트입니다.
 
