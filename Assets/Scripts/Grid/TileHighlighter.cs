@@ -384,7 +384,7 @@ public class TileHighlighter : MonoBehaviour
             if (cell == null) continue;
 
             cell.SetRootActive(true);
-            ApplyBase(cell, ResolveBaseType(tile));
+            ApplyBase(cell, ResolveBaseType(tile), tile);
             ApplyFx(cell, ResolveFx(tile));
         }
     }
@@ -422,24 +422,55 @@ public class TileHighlighter : MonoBehaviour
         return cell;
     }
 
-    void ApplyBase(OverlayCellView cell, BaseOverlayType baseType)
+    void ApplyBase(OverlayCellView cell, BaseOverlayType baseType, Vector2Int tile)
     {
         cell.HideAllBase();
+
+        GameObject activeBase = null;
 
         switch (baseType)
         {
             case BaseOverlayType.Move:
-                if (cell.baseMove != null) cell.baseMove.SetActive(true);
+                activeBase = cell.baseMove;
                 break;
 
             case BaseOverlayType.SkillRange:
-                if (cell.baseSkillRange != null) cell.baseSkillRange.SetActive(true);
+                activeBase = cell.baseSkillRange;
                 break;
 
             case BaseOverlayType.PreviewArea:
-                if (cell.basePreviewArea != null) cell.basePreviewArea.SetActive(true);
+                activeBase = cell.basePreviewArea;
                 break;
         }
+
+        if (activeBase != null)
+        {
+            activeBase.SetActive(true);
+
+            var pulse = activeBase.GetComponent<TilePulseFx>();
+            if (pulse != null)
+            {
+                bool pulseOn = ShouldPulseBase(tile, baseType);
+                pulse.enabled = pulseOn;
+            }
+        }
+    }
+
+    bool ShouldPulseBase(Vector2Int tile, BaseOverlayType baseType)
+    {
+        // 실제 피해/효과 대상이 최우선
+        if (targetFxTiles.Contains(tile)) return true;
+        if (warningFxTiles.Contains(tile)) return true;
+
+        // AOE 범위는 PreviewArea 전체 pulse
+        if (baseType == BaseOverlayType.PreviewArea &&
+            previewAreaTiles.Contains(tile))
+            return true;
+
+        // 이동/단일 선택은 selected만 pulse
+        if (selectedFxTiles.Contains(tile)) return true;
+
+        return false;
     }
 
     void ApplyFx(OverlayCellView cell, TileFxFlags fx)

@@ -32,4 +32,15 @@ public class TilePulseFx : MonoBehaviour
             renderers[i].color = c;
         }
     }
+
+    void OnDisable()
+    {
+        if (renderers == null || baseColors == null) return;
+
+        for (int i = 0; i < renderers.Length; i++)
+        {
+            if (renderers[i] == null) continue;
+            renderers[i].color = baseColors[i];
+        }
+    }
 }

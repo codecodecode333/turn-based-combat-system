@@ -6557,7 +6557,7 @@ MonoBehaviour:
   - {fileID: 461920128}
   turnText: {fileID: 2123870233}
   unitInfoPanel: {fileID: 188907693}
-  turnPopup: {fileID: 0}
+  turnPopup: {fileID: 1951973563}
   turnTransitionDelay: 0.35
   enemyThinkDelay: 0.45
   afterMoveDelay: 0.15
@@ -7743,13 +7743,15 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 1951973562}
+  - component: {fileID: 1951973563}
+  - component: {fileID: 1951973564}
   m_Layer: 5
   m_Name: TurnPopup
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!224 &1951973562
 RectTransform:
   m_ObjectHideFlags: 0
@@ -7771,6 +7773,36 @@ RectTransform:
   m_AnchoredPosition: {x: 0, y: 100}
   m_SizeDelta: {x: 100, y: 100}
   m_Pivot: {x: 0.5, y: 0.5}
+--- !u!114 &1951973563
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1951973561}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 32cfdf04ec610d845b86b8782afdf206, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::TurnPopup
+  popupText: {fileID: 386527772}
+  canvasGroup: {fileID: 1951973564}
+  fadeInTime: 0.12
+  holdTime: 0.55
+  fadeOutTime: 0.25
+  punchScale: 1.12
+--- !u!225 &1951973564
+CanvasGroup:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1951973561}
+  m_Enabled: 1
+  m_Alpha: 0
+  m_Interactable: 1
+  m_BlocksRaycasts: 1
+  m_IgnoreParentGroups: 0
 --- !u!1 &1954901866
 GameObject:
   m_ObjectHideFlags: 0
