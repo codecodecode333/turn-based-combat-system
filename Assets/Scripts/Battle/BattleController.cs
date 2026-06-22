@@ -1229,16 +1229,34 @@ public class BattleController : MonoBehaviour
     }
     List<Vector2Int> BuildManhattanDisk(Vector2Int center, int radius)
     {
-        var list = new List<Vector2Int>( (radius * 2 + 1) * (radius * 2 + 1) );
+        var list = new List<Vector2Int>((radius * 2 + 1) * (radius * 2 + 1));
+
+        if (grid == null)
+            grid = GridManager.I;
+
         for (int dx = -radius; dx <= radius; dx++)
         {
             int rem = radius - Mathf.Abs(dx);
+
             for (int dy = -rem; dy <= rem; dy++)
             {
                 var p = new Vector2Int(center.x + dx, center.y + dy);
+
+                if (grid == null)
+                    continue;
+
+                // 1. grid 크기 밖이면 제외
+                if (!grid.InBounds(p))
+                    continue;
+
+                // 2. 실제 배치된 타일이 없으면 제외
+                if (grid.GetTile(p) == null)
+                    continue;
+
                 list.Add(p);
             }
         }
+
         return list;
     }
 
